@@ -64,13 +64,14 @@ jobs:
           node-version: "24"
           registry-url: https://registry.npmjs.org
       # Bun owns installs/builds. npm is used only for its OIDC publishing support.
-      # Locate the tarball instead of trusting a glob: the artifact actions'
-      # floating major tags changed the extracted layout once (v2.0.8, 2026-10-14),
-      # and an unmatched glob makes npm treat the literal as a git URL.
+      # Locate the tarball explicitly and publish it by an anchored ./ path: current
+      # npm parses a bare `package/<file>.tgz` argument as the GitHub shorthand
+      # `github:package/<file>` (v2.0.8 publish runs 38647325510 and 38647719689).
       - name: Publish the packed tarball
         run: |
           set -euo pipefail
           ls -laR package
           mapfile -t TGZ < <(find package -type f -name '*.tgz')
           test "${#TGZ[@]}" -eq 1 || { echo "expected exactly one .tgz, found ${#TGZ[@]}" >&2; exit 1; }
-          npm publish "${TGZ[0]}" --access public --provenance
+          # A bare dir/file argument is parsed by current npm as a GitHub shorthand; anchor it.
+          npm publish "./${TGZ[0]}" --access public --provenance
