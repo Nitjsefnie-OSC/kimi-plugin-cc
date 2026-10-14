@@ -110,8 +110,11 @@ export class JobStore {
     let db: SqliteAdapter | undefined;
     try {
       db = createSqliteAdapter(paths.stateDbPath);
-      db.pragma("journal_mode = WAL");
+      // busy_timeout FIRST: switching the journal mode takes a brief write lock,
+      // and a second opener (status/result racing a worker) otherwise fails
+      // immediately with SQLITE_BUSY instead of waiting (seen 2026-10-14).
       db.pragma("busy_timeout = 5000");
+      db.pragma("journal_mode = WAL");
     } catch (error) {
       try {
         db?.close();

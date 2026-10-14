@@ -185,6 +185,12 @@ const BINARY_VERSION = detectBinaryVersion(BINARY);
 // its v2 lanes. The real binary must match exactly; hook/schema and preflight
 // enforcement still run. Production never reads this variable.
 const V2_CANDIDATE = process.env.KIMI_PLUGIN_CC_SMOKE_V2_CANDIDATE;
+if (process.env.KIMI_PLUGIN_CC_SMOKE === "1") {
+  // Make the log self-proving: which binary and which candidate this run exercised.
+  console.log(
+    `[smoke] candidate=${V2_CANDIDATE ?? "(production table)"} bin=${process.env.KIMI_PLUGIN_CC_KIMI_BIN ?? "(PATH kimi)"} seed_home=${process.env.KIMI_PLUGIN_CC_SMOKE_HOME ?? "(default ~/.kimi-code)"}`,
+  );
+}
 if (SMOKE_ENABLED && V2_CANDIDATE !== undefined &&
     (parseVersionLine(V2_CANDIDATE)?.raw !== V2_CANDIDATE || BINARY_VERSION !== V2_CANDIDATE)) {
   throw new Error(`smoke v2 candidate ${V2_CANDIDATE} does not match binary ${BINARY_VERSION}`);

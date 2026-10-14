@@ -1,12 +1,12 @@
 # Roadmap
 
-Current direction after [2.0.7](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.0.7), updated 2026-09-26. The original filename is retained so existing links keep working.
+Current direction after [2.0.8](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.0.8), updated 2026-10-15. The original filename is retained so existing links keep working.
 
 For installation, start with the [multilingual README](./README.md). For release details, see the [changelog](./CHANGELOG.md). The exact compatibility table lives in [runtime/kimi-engine.ts](./runtime/kimi-engine.ts); the standing safety contracts live in [AGENTS.md](./AGENTS.md) and [docs/invariants.md](./docs/invariants.md).
 
 ## Where the project stands
 
-The plugin is released for **Claude Code and Codex**, using the same subprocess runtime. The native-v2 safety model keeps plan mode unreachable in plugin-managed sessions and checks compatibility before spawning Kimi. Plugin 2.0.6 certifies exact kimi-code 2.1.0 and 2.1.1 after separate source and live gates. Plugin versions advance independently using ordinary SemVer; certification and compatible maintenance use the next unused patch.
+The plugin is released for **Claude Code and Codex**, using the same subprocess runtime. The native-v2 safety model keeps plan mode unreachable in plugin-managed sessions and checks compatibility before spawning Kimi. Plugin 2.0.8 certifies exact kimi-code 0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2, 2.1.0, 2.1.1 and 2.2.0 for all eight operations (the table lives in `runtime/kimi-engine.ts`), each after separate source and live gates. Plugin versions advance independently using ordinary SemVer; certification and compatible maintenance use the next unused patch.
 
 | Available now | What that means for users |
 | --- | --- |

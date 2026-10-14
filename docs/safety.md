@@ -1,6 +1,6 @@
 # Safety
 
-This guide describes the shipped 2.0.6 runtime. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
+This guide describes the shipped 2.0.8 runtime. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
 
 Native agent-core-v2 is certified at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, and `2.1.1`, with plan mode disabled. The [runtime certification table](../runtime/kimi-engine.ts) controls routing. The hook is not an operating-system sandbox.
 
@@ -224,6 +224,34 @@ If another installed host still points to an older hook, that hook may veto thes
 - **Gated tightly.** Requires kimi-code **≥ 0.18.0** (below it `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` is ignored, so a write fan-out would have no hard peak bound — unacceptable for concurrent writers); because that cap cannot be guaranteed without a confirmed version, the write-mode version gate **fails closed** on an unconfirmable `kimi --version` probe (the shared execution-plan gate also refuses unverified or uncertified binaries for read-only swarm; older certified legacy versions may lack the hard concurrency setting). Also requires a git repo with a **committed HEAD**, and the PreToolUse hook (**refuses** without it, like read swarm). Bases the worktree on HEAD, so a **loud warning** fires when the working tree is dirty (uncommitted work is not visible to the swarm). Default `--max-concurrency` is **1** (serialize) since disjoint-target partitioning is prompt-only and unenforceable by the stateless hook; the coordinator prompt also forbids git mutation and nested `AgentSwarm`.
 - **Field-proven by a real-binary smoke.** `tests/runtime/real-binary-smoke.test.ts` runs the real `runSwarm --write` and asserts the POSITIVE end-to-end (a `coder` subagent's edits land in the worktree, captured as a patch; the user's real tree is byte-identical + git-clean; the worktree is cleaned up) plus the NEGATIVE (an absolute-path write outside the trusted root is hook-denied). It is the check that catches `tool_input` field-name drift — `Write`/`Edit` carry `path`, not `file_path`, and reading the wrong key denies every real write silently.
 - **Model-invocable agent (v1.5), patch-only by construction.** Following the field-proof above, `--write` now has a `kimi-swarm-write` subagent so the main Claude thread can dispatch a write fan-out on its own judgement — the same human-command + model-invocable-agent split the rest of the suite uses. Auto-dispatch is a safe extension here because it widens **no** write surface and removes **no** bound: the agent path runs the identical `runSwarm --write` code, so edits still land only in the throwaway worktree, the managed hook still gates every `coder` subagent, the patch is still handed back for the user to apply (**the plugin never applies or commits**), and `--budget` + default `--max-concurrency` 1 + the hook requirement all still hold. In fact write-swarm is a *less* dangerous agent than the `kimi-pursue` agent already shipped: pursue writes directly into the workspace, whereas write-swarm's output is a patch the human reviews before anything reaches a real tree. Because it is still a write surface, the agent description demands BOTH signals — many disjoint write targets AND explicit fan-out intent — and steers single edits to `kimi-rescue`, read-only fan-outs to `kimi-swarm`, and autonomous loops to `kimi-pursue`. Default `--max-concurrency` stays **1**; raising it (concurrent writers) remains a deliberate, human-or-explicitly-requested choice.
+
+## Response budgets and partial output (2.0.8)
+
+Every single-turn command runs under a wall-clock budget: ask, review and
+challenge default to 30 minutes, rescue to 45, and `--budget <dur>` (at most
+24h) overrides it per job. The budget is persisted on the job row, so a detached
+worker and a same-operation resume use the same ceiling. For these commands the
+budget is a response-time limit, not a safety bound: a timeout is a safe
+failure. The job stays `failed`; whatever assistant prose had settled is written
+into the artifact under a heading that says it is NOT a final answer, and
+`result <jobId> --json` reports `partial_output: true` when prose exists.
+Cancellation and nonzero exits do not capture partial output. A session id is
+kept only if Kimi announced it before the deadline; native v2 announces it at
+session end, so a timed-out v2 turn is normally not resumable from the plugin.
+
+Pursue and swarm keep their ceilings as the sole hard bound on autonomy and
+cost. One nuance: a run whose process exits cleanly in the same event-loop tick
+as the budget timer is accepted as a success rather than discarded, so a goal
+can complete at most one tick past its ceiling — teardown has already settled by
+then, and nothing runs longer.
+
+Every spawn also deletes `KIMI_CODE_TRUST_WORKSPACE` from the child
+environment (kimi-code 2.2.0): a trusted workspace boots repo-defined project
+MCP servers at bootstrap, outside the PreToolUse hook, and an inherited value
+would have trusted every plugin spawn including swarm-write's throwaway
+worktree. A directory the operator trusted interactively in the Kimi TUI still
+has that property; that persisted-trust route is a documented residual, not
+something the plugin can close.
 
 ## The setup probe
 

@@ -140,7 +140,7 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 | Plugin slash commands / command activation | `agent/pluginCommand/`, `agent/plugin/`, `app/plugin/` | activation stays RPC/host-initiated and absent from `-p`; `-p` intercepts exactly one prefix, `/goal` (`apps/kimi-code/src/cli/goal-prompt.ts:43`); a plugin command must never become a model-reachable tool or a permission bypass | read-only commands hard-prefix an instruction line so their prompt never starts with `/goal`; `runtime/commands/pursue.ts` is the only `/goal` producer |
 | Tool input schemas the allowlist reads | `agent/tools/os/write/writeTool.ts`, `agent/tools/edit/editTool.ts` (`path`; Write also `mode`), `agent/tools/os/bash/bashTool.ts` (`command`, **`cwd`**, `timeout`, `run_in_background`; `effectiveCwd` asserts NO workspace membership, `:191`) | field names, and the fact that `Bash.cwd` is honoured without an upstream membership check while the hook payload's top-level `cwd` is the process cwd | `runtime/rescue-approval.ts` (`checkApprovedPath`, `checkApprovedDirectory` confines `tool_input.cwd` to the trusted root before the command string); tag scan asserts the field names |
 | AgentSwarm / subagents | `features/swarm/tools/agent-swarm/agentSwarmTool.ts` (`'AgentSwarm'`, strict schema), `features/swarm/agent/swarmService.ts`; `KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY` (unset = no cap) | children run in-process in a child DI scope sharing the session workspace with their OWN eager external-hooks service — every child tool call fires the hook; no deny-all path on the swarm route; `fork` gated by `subagent_fork` | `runtime/commands/swarm.ts` always exports the concurrency cap (4 read / 1 write); the `swarm`/`swarm-write` hook labels; worktree confinement via `KIMI_PLUGIN_CC_WORKSPACE_ROOT` |
-| Experimental features | `apps/kimi-code/src/utils/experimental-features.ts` (`[experimental]` config table, per-flag `KIMI_CODE_EXPERIMENTAL_*` env, master `KIMI_CODE_EXPERIMENTAL_FLAG`; precedence env → config → master → default) | `tower` and `subagent_fork` are v2-only features outside the certified profile; the master flag enables all of them | `inspectExperimentalSelectors` (`CLI_V2_EXPERIMENTAL_UNSAFE`) + `assertNoUnsafeExperimentalSelector` (`CLI_V2_HOOK_ORDER_UNSAFE`) refuse before spawn |
+| Experimental features | `packages/agent-core-v2/src/app/flag/` + each feature's `flag.ts` (the flag registry since 2.x; `apps/kimi-code/src/utils/experimental-features.ts` is the vestigial CLI-side shim) (`[experimental]` config table, per-flag `KIMI_CODE_EXPERIMENTAL_*` env, master `KIMI_CODE_EXPERIMENTAL_FLAG`; precedence env → config → master → default) | `tower` and `subagent_fork` are v2-only features outside the certified profile; the master flag enables all of them | `inspectExperimentalSelectors` (`CLI_V2_EXPERIMENTAL_UNSAFE`) + `assertNoUnsafeExperimentalSelector` (`CLI_V2_HOOK_ORDER_UNSAFE`) refuse before spawn |
 | Stream-json output | `apps/kimi-code/src/cli/prompt-render.ts` (`system.version` FIRST line, `session.resume_hint`, `turn.step.retrying`), `apps/kimi-code/src/cli/goal-prompt.ts` (`goal.summary`) | NDJSON record shapes for assistant/tool/tool_result; `role:"meta", type:"system.version"` is the provenance marker a v2 plan requires first and must equal the probed version; `session.resume_hint` carries the `session_<uuid>` token that round-trips via `-r` | `runtime/stream-json.ts` parser; `runtime/cli-client.ts` provenance gate (`CLI_ENGINE_PROVENANCE_MISMATCH`) and session pinning |
 | CLI argv | `apps/kimi-code/src/cli/options.ts` | `-p` (prompt as VALUE), `-r`/`-S`/`--session`, `--output-format stream-json`, `-m`, `--skills-dir` accepted with current semantics; `--agent`/`--agent-file`/`--add-dir` exist and are NEVER passed | `runtime/cli-client.ts::buildArgs`; `runtime/kimi-command.ts::assertPrefixArgsSafe` refuses reserved flags in the launcher prefix |
 | Session store layout | `<KIMI_CODE_HOME>/sessions/<workspaceId>/<sessionId>/agents/<agentId>/wire.jsonl` (+ `state.json`, `logs/`) | the journal the preflight scans lives exactly there; a layout change fails closed as `KIMI_SESSION_JOURNAL_UNAVAILABLE` (every v2 resume would refuse) | `scanSessionJournalsForPlan`; smoke lane 3b asserts the real layout |
@@ -231,8 +231,9 @@ git diff "$PREV".."$NEW" -- \
 # The TOOL LAYER (input schemas whose field names the hook allowlist reads:
 # Write/Edit `path`, Bash `command` + `cwd`), the fan-out / delegation
 # features (swarm, goal, tower, btw, plugin commands, agent profiles) that
-# spawn or steer additional tool callers, and the SDK/kaos packages under the
-# -p path (a 0-byte agent-core-v2 diff does NOT cover them).
+# spawn or steer additional tool callers, and the SDK package under the -p path
+# (a 0-byte agent-core-v2 diff does NOT cover it). `packages/kaos` was deleted
+# upstream in 2.2.0; it was never imported by the CLI app.
 git diff "$PREV".."$NEW" -- \
   packages/agent-core-v2/src/agent/tools/ \
   packages/agent-core-v2/src/features/swarm/ \
@@ -244,7 +245,6 @@ git diff "$PREV".."$NEW" -- \
   packages/agent-core-v2/src/app/plugin/ \
   packages/agent-core-v2/src/app/agentProfileCatalog/ \
   packages/node-sdk/src \
-  packages/kaos/src \
   > /tmp/kimi-<NEW>-diff/06-tools-fanout-sdk.diff
 ```
 

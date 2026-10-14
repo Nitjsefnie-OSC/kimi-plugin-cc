@@ -17,6 +17,21 @@ The trusted publisher is configured for `linxule/kimi-plugin-cc`, workflow
 use short-lived OIDC credentials, without a stored npm token or interactive 2FA.
 The first npm OIDC publication will be the next release; do not republish 2.0.7.
 
+**2026-10-15 status.** The `v2.0.8` release triggered the first OIDC attempt. It
+failed twice on the publish step for reasons unrelated to the package: current
+npm parses a bare `package/<file>.tgz` argument as the GitHub shorthand
+`github:package/<file>` (fixed in `publish.yml`, which now locates the tarball
+and publishes an anchored `./` path), and the manual re-dispatch then received
+`404 Not Found - PUT https://registry.npmjs.org/kimi-plugin-cc`, the response
+npm gives when the OIDC token exchange is refused. The GitHub Actions side
+checks out (environment `npm` exists with no protection rules;
+`NPM_TRUSTED_PUBLISHING=true`), so the trusted-publisher binding on npmjs.com is
+the next thing to verify, then `gh workflow run publish.yml -f tag=v2.0.8`.
+Until it succeeds the registry serves 2.0.7, which refuses kimi-code 2.2.0; the
+GitHub marketplaces serve 2.0.8. Note that a `release` event runs the workflow
+file at the tag, so fixes to `publish.yml` reach an existing tag only through
+`workflow_dispatch`.
+
 ## Validation
 
 Use the repository's normal version bump and generated-surface procedure in
