@@ -42,6 +42,10 @@ function renderResultEnvelope(job, artifactPath, body) {
         job_id: job.job_id,
         kind: job.command_type,
         status: job.status,
+        budget_ms: job.budget_ms,
+        kimi_session_id: job.kimi_session_id,
+        // True when a budget timeout preserved assistant prose in the artifact.
+        partial_output: job.status === "failed" && Number(job.error?.details?.partial_output_chars ?? 0) > 0,
         summary: job.summary,
         error: job.error,
         artifact_path: artifactPath,

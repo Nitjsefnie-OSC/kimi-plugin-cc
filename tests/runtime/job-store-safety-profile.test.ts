@@ -42,6 +42,7 @@ describe("job-store safety_profile column", () => {
       try {
         const old = store.getJob("old-1");
         expect(old?.safety_profile).toBeNull();
+        expect(old?.budget_ms).toBeNull();
         expect(old?.updated_at).toBe("2026-09-01T00:00:00Z");
 
         const created = store.createJob({
@@ -52,6 +53,7 @@ describe("job-store safety_profile column", () => {
           model: null,
           thinking: null,
           background: false,
+          budget_ms: 2_700_000,
           pid: null,
           kimi_pid: null,
           status: "running",
@@ -70,6 +72,8 @@ describe("job-store safety_profile column", () => {
           stream_log_path: path.join(root, "log.jsonl"),
           error: null,
         });
+        expect(created.budget_ms).toBe(2_700_000);
+        expect(store.getJob("new-1")?.budget_ms).toBe(2_700_000);
         expect(created.safety_profile).toBe("native-v2-no-plan/1");
         expect(store.getJob("new-1")?.safety_profile).toBe("native-v2-no-plan/1");
       } finally {

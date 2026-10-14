@@ -6,35 +6,35 @@ import { RuntimeError } from "../../runtime/errors.js";
 
 describe("parseDurationMs", () => {
   test("parses unit suffixes", () => {
-    expect(parseDurationMs("90s", "--budget")).toBe(90_000);
-    expect(parseDurationMs("30m", "--budget")).toBe(1_800_000);
-    expect(parseDurationMs("1h", "--budget")).toBe(3_600_000);
+    expect(parseDurationMs("90s", "--budget", "pursue.parse", "safety")).toBe(90_000);
+    expect(parseDurationMs("30m", "--budget", "pursue.parse", "safety")).toBe(1_800_000);
+    expect(parseDurationMs("1h", "--budget", "pursue.parse", "safety")).toBe(3_600_000);
   });
 
   test("treats a bare integer as minutes", () => {
-    expect(parseDurationMs("45", "--budget")).toBe(2_700_000);
+    expect(parseDurationMs("45", "--budget", "pursue.parse", "safety")).toBe(2_700_000);
   });
 
   test("rejects malformed and non-positive durations", () => {
-    expect(() => parseDurationMs("abc", "--budget")).toThrow(RuntimeError);
-    expect(() => parseDurationMs("0m", "--budget")).toThrow(RuntimeError);
-    expect(() => parseDurationMs("-5", "--budget")).toThrow(RuntimeError);
-    expect(() => parseDurationMs("30x", "--budget")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("abc", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("0m", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("-5", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("30x", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
   });
 
   test("accepts a duration at the 24h ceiling", () => {
-    expect(parseDurationMs("24h", "--budget")).toBe(MAX_DURATION_MS);
-    expect(parseDurationMs("1440", "--budget")).toBe(MAX_DURATION_MS); // 1440 min = 24h
-    expect(parseDurationMs("86400s", "--budget")).toBe(MAX_DURATION_MS);
+    expect(parseDurationMs("24h", "--budget", "pursue.parse", "safety")).toBe(MAX_DURATION_MS);
+    expect(parseDurationMs("1440", "--budget", "pursue.parse", "safety")).toBe(MAX_DURATION_MS); // 1440 min = 24h
+    expect(parseDurationMs("86400s", "--budget", "pursue.parse", "safety")).toBe(MAX_DURATION_MS);
   });
 
   test("rejects absurdly large durations above the 24h ceiling", () => {
     // The budget is the SOLE hard wall-clock bound on pursue/swarm; a runaway
     // value would effectively disable it, so it must hard-fail, not clamp.
-    expect(() => parseDurationMs("25h", "--budget")).toThrow(RuntimeError);
-    expect(() => parseDurationMs("1441", "--budget")).toThrow(RuntimeError); // 1441 min > 24h
-    expect(() => parseDurationMs("999999h", "--budget")).toThrow(RuntimeError);
-    expect(() => parseDurationMs("86401s", "--budget")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("25h", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("1441", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError); // 1441 min > 24h
+    expect(() => parseDurationMs("999999h", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
+    expect(() => parseDurationMs("86401s", "--budget", "pursue.parse", "safety")).toThrow(RuntimeError);
   });
 });
 

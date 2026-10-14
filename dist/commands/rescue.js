@@ -1,3 +1,4 @@
+import { companionHelp } from "../help.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
@@ -16,7 +17,7 @@ import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 export { describeMissingResult } from "../background-spawn.js";
 // v1.0 cutover note (PR 3):
@@ -41,6 +42,8 @@ const RESCUE_SUMMARY_MAX = 120;
 const RESCUE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 export async function runRescue(argv, context) {
     const parsed = parseRescueArgs(argv);
+    if (parsed.help)
+        return companionHelp(["task", "rescue", ...argv]);
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);
     const repoIdentity = await resolveRepoIdentity(context.cwd);
@@ -68,6 +71,7 @@ export async function runRescue(argv, context) {
             model: parsed.model ?? null,
             thinking: parsed.thinking ?? null,
             background: parsed.background,
+            budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "rescue" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
             pid: parsed.background ? null : process.pid,
             kimi_pid: null,
             status: "running",
@@ -185,7 +189,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             signal: handlers.signal,
             // SIGKILL escalation defaults to 1500ms inside cli-client —
             // matches v0.4's cancellation.ts behavior for the wire client.
-        }, KIMI_RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
+        }, job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "rescue.runtime");
@@ -248,8 +252,11 @@ export async function executeRescueJob(jobId, prompt, context, options) {
         }
         const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
             preserveStage: true,
+            background: job.background,
+            budgetMs: job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS,
         });
-        return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
+        const partialOutput = captureTimeoutPartialOutput(classified, store, job);
+        return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed", partialOutput });
     }
     finally {
         handlers.dispose();

@@ -143,6 +143,7 @@ export async function runPursue(argv, context) {
             model: parsed.model ?? null,
             thinking: parsed.thinking ?? null,
             background: false,
+            budget_ms: parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS,
             pid: process.pid,
             kimi_pid: null,
             status: "running",
@@ -168,7 +169,7 @@ export async function runPursue(argv, context) {
             await markJobFailed(store, paths, job, classified, "Pursue failed.", { phase: "failed" });
             throw classified;
         }
-        const completed = await executePursueJob(job.job_id, prompt, objective, parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS, context);
+        const completed = await executePursueJob(job.job_id, prompt, objective, job.budget_ms, context);
         if (!completed.final_output_path) {
             throw new RuntimeError("PURSUE_RESULT_MISSING", "Pursue finished without a rendered result.", "pursue.result");
         }

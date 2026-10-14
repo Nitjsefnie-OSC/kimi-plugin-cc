@@ -207,6 +207,13 @@ export async function writeGeneratedCodexSurfaces(repoRoot: string): Promise<voi
 
   for (const file of generatedCodexSurfaceFiles()) {
     const absolutePath = path.join(repoRoot, file.path);
+    // Avoid rewriting byte-identical sidecars (including a read-only repo
+    // marketplace). Changed or missing content still requires a real write.
+    try {
+      if (await readFile(absolutePath, "utf8") === file.content) continue;
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+    }
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, file.content, "utf8");
   }

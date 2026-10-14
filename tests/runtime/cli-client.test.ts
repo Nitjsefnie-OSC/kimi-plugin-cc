@@ -1,10 +1,10 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, test, spyOn } from "bun:test";
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
-import { runCliPrompt, runCliPromptWithBudget, requireSessionId } from "../../runtime/cli-client.js";
+import { runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
 import type { KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
@@ -1455,6 +1455,19 @@ describe("native-v2 provenance", () => {
     }
   });
 
+  test.each(["ask", "review", "challenge", "rescue", "swarm", "swarm-write", "review_gate"])("never inherits KIMI_CODE_TRUST_WORKSPACE for %s", async (commandLabel) => {
+    const root = await createTestPluginDataRoot("cli-no-ambient-trust");
+    try {
+      const opts = mockOptions({ cwd: root, records: [], commandLabel });
+      const env = { ...opts.env, KIMI_CODE_TRUST_WORKSPACE: "1", KIMI_MOCK_ECHO_ENV: "KIMI_CODE_TRUST_WORKSPACE" };
+      const result = await runCliPrompt({ ...opts, env, trustedWorkspaceRoot: root });
+      expect((result.records[0] as AssistantRecord).content).toBe("KIMI_CODE_TRUST_WORKSPACE=UNSET");
+      expect(env.KIMI_CODE_TRUST_WORKSPACE).toBe("1");
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
+
   test("exports KIMI_CODE_NO_AUTO_UPDATE=1 to every spawn (legacy plan)", async () => {
     const root = await createTestPluginDataRoot("cli-v1-no-auto-update");
     try {
@@ -1996,23 +2009,67 @@ describe("runCliPromptWithBudget", () => {
     }
   });
 
+  test.each([0, 9])("same-tick settlement preserves non-aborted exit %i", async (exitCode) => {
+    const root = await createTestPluginDataRoot("cli-budget-same-tick");
+    const budgetMs = 1_234_567;
+    const realSetTimeout = globalThis.setTimeout;
+    const realRemoveListener = AbortSignal.prototype.removeEventListener;
+    let fireBudget: (() => void) | undefined;
+    let fired = false;
+    const timers = spyOn(globalThis, "setTimeout").mockImplementation(((callback: (...args: any[]) => void, ms?: number, ...args: any[]) => {
+      if (ms === budgetMs) fireBudget = () => callback(...args);
+      return realSetTimeout(callback, ms, ...args);
+    }) as typeof setTimeout);
+    // Deliver the budget callback after runCliPrompt removes its abort listener
+    // at settlement, but before its promise resolves. No timing lottery or mock result.
+    const listeners = spyOn(AbortSignal.prototype, "removeEventListener").mockImplementation(function (this: AbortSignal, ...args: Parameters<AbortSignal["removeEventListener"]>) {
+      realRemoveListener.call(this, ...args);
+      if (args[0] === "abort" && !fired && fireBudget) { fired = true; fireBudget(); }
+    });
+    try {
+      const outcome = await runCliPromptWithBudget(mockOptions({
+        cwd: root, records: [{ role: "assistant", content: "finished at boundary" }], exitCode,
+      }), budgetMs, "test.same-tick").catch((error: unknown) => error);
+      expect(fired).toBe(true);
+      if (exitCode === 0) {
+        expect(outcome).toMatchObject({ exitCode: 0, aborted: false, records: [{ role: "assistant", content: "finished at boundary" }] });
+        expect(outcome).not.toBeInstanceOf(ResponseTimeoutError);
+      } else {
+        expect(outcome).toBeInstanceOf(ResponseTimeoutError);
+        expect((outcome as ResponseTimeoutError).details.settled_post_abort).toBe(true);
+        expect((outcome as ResponseTimeoutError).partialResult).toMatchObject({ exitCode, aborted: false });
+      }
+    } finally {
+      listeners.mockRestore();
+      timers.mockRestore();
+      await cleanupTestPath(root);
+    }
+  });
+
   test("aborts the subprocess when the budget expires", async () => {
     const root = await createTestPluginDataRoot("cli-budget-timeout");
     try {
       // Mock holds for 5s; budget is 300ms — we should observe a
       // RESPONSE_TIMEOUT and the subprocess should be SIGTERMed.
       const start = Date.now();
-      await expect(
-        runCliPromptWithBudget(
-          mockOptions({
-            cwd: root,
-            records: [{ role: "assistant", content: "late" }],
-            delayMs: 5_000,
-          }),
-          300,
-          "test.budget-timeout",
-        ),
-      ).rejects.toMatchObject({
+      const error = await runCliPromptWithBudget(
+        mockOptions({
+          cwd: root,
+          records: [{ role: "assistant", content: "late" }],
+          delayMs: 5_000,
+        }),
+        300,
+        "test.budget-timeout",
+      ).catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(ResponseTimeoutError);
+      const timeout = error as ResponseTimeoutError;
+      expect(timeout.message).not.toContain("race");
+      expect(timeout.partialResult?.records).toEqual([{ role: "assistant", content: "late" }]);
+      expect(timeout.partialResult?.aborted).toBe(true);
+      expect(timeout.details).toMatchObject({ budget_ms: 300, record_count: 1, partial_output_chars: 4, aborted: true, settled_post_abort: true });
+      expect(JSON.stringify(timeout)).not.toContain("partialResult");
+      expect(JSON.stringify(timeout.details)).not.toContain("late");
+      expect(timeout).toMatchObject({
         code: "RESPONSE_TIMEOUT",
         stage: "test.budget-timeout",
       });
@@ -2080,6 +2137,25 @@ describe("runCliPromptWithBudget", () => {
     } finally {
       releaseCollector();
       await timedRun?.catch(() => undefined);
+      await cleanupTestPath(root);
+    }
+  });
+
+  test("timeout carries no partial result when owned teardown rejects", async () => {
+    const root = await createTestPluginDataRoot("cli-budget-teardown-error");
+    try {
+      const error = await runCliPromptWithBudget(mockOptions({
+        cwd: root,
+        records: [{ role: "assistant", content: "not safe to publish" }],
+        delayMs: 5_000,
+        cancellationTeardownHook: async () => { throw new Error("forced teardown rejection"); },
+      }), 300, "test.budget-teardown-error").catch((error: unknown) => error);
+      expect(error).toBeInstanceOf(ResponseTimeoutError);
+      const timeout = error as ResponseTimeoutError;
+      expect(timeout.partialResult).toBeUndefined();
+      expect(timeout.cause).toMatchObject({ code: "CLI_CANCELLATION_TEARDOWN_FAILED" });
+      expect(timeout.details).toMatchObject({ budget_ms: 300, record_count: 0, partial_output_chars: 0, aborted: true });
+    } finally {
       await cleanupTestPath(root);
     }
   });

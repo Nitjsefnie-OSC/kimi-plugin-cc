@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { RuntimeError } from "../../runtime/errors.js";
-import { parseAskArgs, parseJobLookupArgs, parseRescueArgs, parseReviewArgs } from "../../runtime/parsing.js";
+import { parseAskArgs, parsePursueArgs, parseSwarmArgs, parseJobLookupArgs, parseRescueArgs, parseReviewArgs } from "../../runtime/parsing.js";
 
 describe("argument parsing", () => {
   test("parseAskArgs preserves text after the -- sentinel", () => {
@@ -318,3 +318,51 @@ describe("argument parsing", () => {
     );
   });
 });
+
+for (const [name, parse] of [["ask", parseAskArgs], ["rescue", parseRescueArgs], ["review", parseReviewArgs], ["challenge", (args: string[]) => parseReviewArgs(args, "challenge")]] as const) {
+  describe(`${name} per-job budget`, () => {
+    test.each([["30m", 1_800_000], ["1h", 3_600_000], ["90s", 90_000], ["15", 900_000], ["24h", 86_400_000]])("parses %s", (duration, expected) => {
+      expect(parse(["--budget", String(duration), "scope"]).budgetMs).toBe(expected as number);
+    });
+    test("omission keeps the command default and -- escapes prompt text", () => {
+      expect(parse(["scope"]).budgetMs).toBeUndefined();
+      expect(parse(["--", "--budget", "25h"]).budgetMs).toBeUndefined();
+    });
+    test.each([[], ["0"], ["-1"], ["25h"], ["nope"], ["--fresh"]])("rejects invalid duration %j", (...value) => {
+      expect(() => parse(["--budget", ...value])).toThrow(RuntimeError);
+      try { parse(["--budget", ...value]); } catch (error) {
+        expect(error).toMatchObject({ code: "INVALID_ARGS", stage: `${name}.parse` });
+      }
+    });
+  });
+}
+
+for (const [name, parse] of [["ask", parseAskArgs], ["rescue", parseRescueArgs], ["review", parseReviewArgs], ["challenge", (args: string[]) => parseReviewArgs(args, "challenge")], ["pursue", parsePursueArgs], ["swarm", parseSwarmArgs]] as const) {
+  test(`${name} budget errors have command stage and policy-specific advice`, () => {
+    for (const value of ["invalid", "0", "25h", "--background"]) {
+      let caught: unknown;
+      try { parse(["--budget", value]); } catch (error) { caught = error; }
+      expect(caught).toMatchObject({ code: "INVALID_ARGS", stage: `${name}.parse` });
+      const message = (caught as Error).message;
+      if (value === "--background") expect(message).toBe("--budget requires a duration (e.g. 30m, 1h, 90s).");
+      if (value === "25h") expect(message).toContain(name === "swarm" || name === "pursue"
+        ? "the budget is a safety ceiling, not a scheduler"
+        : "the budget is a response-time limit; a timed-out job is still a safe failure");
+    }
+  });
+}
+
+for (const parse of [parseAskArgs, parseRescueArgs]) {
+  test(`${parse.name} handles help before validation or trailing-text slurp`, () => {
+    for (const args of [["--help"], ["-h"], ["--budget", "--help"], ["-m", "kimi", "-h"], ["--unknown", "-h"]]) {
+      expect(parse(args).help).toBe(true);
+      expect(parse(args).prompt).toBeUndefined();
+    }
+    expect(parse(["--", "--help"]).help).toBeUndefined();
+    expect(parse(["--", "--help"]).prompt).toBe("--help");
+    // Prose ends the flag region: a later -h/--help is prompt text, not a help request.
+    expect(parse(["what", "does", "du", "-h", "print"]).help).toBeUndefined();
+    expect(parse(["what", "does", "du", "-h", "print"]).prompt).toBe("what does du -h print");
+    expect(parse(["prose", "--help"]).help).toBeUndefined();
+  });
+}

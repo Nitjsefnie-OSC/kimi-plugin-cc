@@ -1,3 +1,4 @@
+import { REPLAY_SUPPORTED_FLAGS } from "../parsing.js";
 import { access, stat, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 
@@ -57,10 +58,10 @@ interface StreamLogEntry {
 
 export async function runReplay(argv: string[], context: CommandContext): Promise<string> {
   const [jobId, ...rest] = argv;
-  if (!jobId || rest.length > 0) {
+  if (!jobId || jobId.startsWith("-") || rest.length > 0) {
     throw new RuntimeError(
       "INVALID_ARGS",
-      "replay expects exactly one job id: replay <job-id>.",
+      `replay expects exactly one job id: replay <job-id>. Supported flags: ${REPLAY_SUPPORTED_FLAGS}.`,
       "replay.parse",
     );
   }

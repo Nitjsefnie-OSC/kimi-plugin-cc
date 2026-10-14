@@ -68,6 +68,7 @@ function makeAskJob(logPath: string): JobRecord {
     prompt_digest: "digest",
     summary: "ask",
     phase: null,
+    budget_ms: null,
     final_output_path: null,
     stream_log_path: logPath,
     error: null,
@@ -191,6 +192,7 @@ describe("replay command", () => {
         prompt_digest: "digest",
         summary: "failed",
         phase: null,
+        budget_ms: null,
         final_output_path: null,
         stream_log_path: path.join(pluginDataRoot, "missing.jsonl"),
         error: {
@@ -242,6 +244,7 @@ describe("replay command", () => {
         prompt_digest: "d",
         summary: "review",
         phase: null,
+        budget_ms: null,
         final_output_path: null,
         stream_log_path: logPath,
         error: null,

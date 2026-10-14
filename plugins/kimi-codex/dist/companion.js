@@ -1,3 +1,4 @@
+import { companionHelp } from "./help.js";
 import { runAsk } from "./commands/ask.js";
 import { runModelInventory } from "./commands/models.js";
 import { runCancel } from "./commands/cancel.js";
@@ -15,6 +16,11 @@ import { runWorker } from "./commands/worker.js";
 import { formatError, RuntimeError } from "./errors.js";
 import { resolveKimiHome } from "./kimi-home.js";
 async function main(argv) {
+    const help = companionHelp(argv);
+    if (help !== undefined) {
+        process.stdout.write(`${help}\n`);
+        return;
+    }
     const [command, ...rest] = argv;
     const cwd = process.env.KIMI_PLUGIN_CC_WORKSPACE_CWD || process.cwd();
     const context = {

@@ -1,3 +1,4 @@
+import { companionHelp } from "../help.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
@@ -16,7 +17,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // v1.0 cutover note (PR 2):
 //
@@ -46,6 +47,8 @@ const ASK_PROMPT_PREFIX = [
 ].join("\n");
 export async function runAsk(argv, context) {
     const parsed = parseAskArgs(argv);
+    if (parsed.help)
+        return companionHelp(["ask", ...argv]);
     if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
         await requireAskHookInstalled(context);
     }
@@ -76,6 +79,7 @@ export async function runAsk(argv, context) {
             model: parsed.model ?? null,
             thinking: parsed.thinking ?? null,
             background: parsed.background,
+            budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "ask" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
             pid: parsed.background ? null : process.pid,
             kimi_pid: null,
             status: "running",
@@ -169,7 +173,7 @@ export async function executeAskJob(jobId, prompt, context, options) {
             resumeSessionId: job.kimi_session_id ?? undefined,
             logPath: job.stream_log_path,
             signal: handlers.signal,
-        }, KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
+        }, job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS, "ask.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "ask.runtime");
@@ -227,8 +231,9 @@ export async function executeAskJob(jobId, prompt, context, options) {
             await markJobFailed(store, paths, job, error, cancel.failedSummary, { phase: "failed" });
             throw error;
         }
-        const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
-        await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
+        const classified = classifyManagedCommandFailure(error, "ask", job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS });
+        const partialOutput = captureTimeoutPartialOutput(classified, store, job);
+        await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed", partialOutput });
         throw classified;
     }
     finally {

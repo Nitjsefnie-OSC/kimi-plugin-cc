@@ -4,25 +4,26 @@ How to verify a new kimi-code release against kimi-plugin-cc without breaking th
 
 Use this routine for every new exact native-v2 version, including patches. The 2.1.0/2.1.1 certification is the current worked example. Earlier audits remain useful historical evidence, but their legacy-v1 minor-version rules do not apply to native v2.
 
-## Current certified boundary (2026-09-24)
+## Current certified boundary (2026-10-14)
 
 The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.42.0`,
-`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0` and `2.1.1`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
+`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1` and `2.2.0`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
 `ffa94fae854dedf594919acbea280d98cbe8e14e`, `75ac010bcb2050338444455de8328492d152c919`,
 `1b89e4b039f052d10f258464413b2047acca12ba`, `caf7d4e2fef06967280b325da06e44a4b0516eba`,
 `9d07f634be94ebeb1deba2f55d247807cf729315`,
 `52437299ff78de3d0aff7f38f054e5eb20c512e5`,
-`f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`)
+`f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`,
+`472192c34c1efad89a369870eff0da0b708ce9bb`)
 for all eight operations, and legacy-v1 through 0.41.x for an explicitly pinned binary.
-The most recent worked example is the 2026-09-24 exact 2.1.0/2.1.1 certification
-(plugin 2.0.6; [certification evidence](upstream-2.1-certification.md)).
+The most recent worked example is the 2026-10-14 exact 2.2.0 certification
+(plugin 2.0.8; [certification evidence](upstream-2.2.0-certification.md)).
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 
 The certification basis is the **no-plan construction** (see
 [`native-v2-certification-provenance.md` §2](native-v2-certification-provenance.md#2-native-v2-entry-gate)),
 not an upstream ordering guarantee — plan still registers before external
-hooks at every certified version through 2.1.1 (confirmed in `dist/main.mjs` at 0.42.0 and by the
+hooks at every certified version through 2.2.0 (confirmed in `dist/main.mjs` at 0.42.0 and by the
 plan-ON live control on every certified binary). Certification is per EXACT
 version and per operation; a patch release is NOT certified until the three
 gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
@@ -151,6 +152,12 @@ These are the kimi-code surfaces kimi-plugin-cc consumes. If any one breaks, our
 ### Phase 0 — Setup (5 min)
 
 The upstream clone lives at `.claude/kimi-code-research/kimi-code-repo/`. It's gitignored.
+
+**Precondition — the clone must be pristine.** It lives under iCloud Drive, which leaves
+conflict copies (`name 2.ts`) that the file-set scan reads as new subscribers (2026-10-14:
+`goalService 2.ts` turned the tag scan red). Before any gate run `git status --porcelain`
+must be empty and `find . -name '* [0-9].*' -not -path './.git/*' -not -path './node_modules/*'`
+must print nothing; delete copies, never audit around them.
 
 ```bash
 cd .claude/kimi-code-research/kimi-code-repo
@@ -337,6 +344,7 @@ Documentation corrections do not need a new version or a compatibility tag. Hist
 
 ## Anti-patterns
 
+- Do not run a gate against a clone with conflict copies or uncommitted noise; the file-set scan trusts the tree.
 - Do not add a certification row on source reading alone. Record the exact binary, source tag, final implementation, and live gates that passed.
 - Do not describe a skipped smoke as a pass. A cloud-prepared change remains smoke-pending until the final tree passes with authorized authentication. The manual GitHub workflow supports API-key authentication; enabling per-push calls is a separate cost decision.
 - Do not reuse an earlier green run to cover later behavior changes. Run the affected live lanes against the implementation that will ship.

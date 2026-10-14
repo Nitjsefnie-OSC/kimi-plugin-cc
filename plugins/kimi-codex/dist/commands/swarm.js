@@ -210,6 +210,7 @@ async function runReadSwarm(parsed, objective, context) {
             model: parsed.model ?? null,
             thinking: parsed.thinking ?? null,
             background: false,
+            budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
             pid: process.pid,
             kimi_pid: null,
             status: "running",
@@ -235,7 +236,7 @@ async function runReadSwarm(parsed, objective, context) {
             await markJobFailed(store, paths, job, classified, "Swarm failed.", { phase: "failed" });
             throw classified;
         }
-        const completed = await executeSwarmJob(job.job_id, prompt, objective, parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS, resolveSwarmMaxConcurrency(parsed.maxConcurrency), context);
+        const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, resolveSwarmMaxConcurrency(parsed.maxConcurrency), context);
         if (!completed.final_output_path) {
             throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm finished without a rendered result.", "swarm.result");
         }
@@ -308,6 +309,7 @@ async function runWriteSwarm(parsed, objective, context) {
                 model: parsed.model ?? null,
                 thinking: parsed.thinking ?? null,
                 background: false,
+                budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
                 pid: process.pid,
                 kimi_pid: null,
                 status: "running",
@@ -335,7 +337,7 @@ async function runWriteSwarm(parsed, objective, context) {
                 });
                 throw classified;
             }
-            const completed = await executeSwarmJob(job.job_id, prompt, objective, parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS, resolveSwarmWriteMaxConcurrency(parsed.maxConcurrency), context, { spawnCwd: worktreePath, workspaceRoot: worktreePath });
+            const completed = await executeSwarmJob(job.job_id, prompt, objective, job.budget_ms, resolveSwarmWriteMaxConcurrency(parsed.maxConcurrency), context, { spawnCwd: worktreePath, workspaceRoot: worktreePath });
             if (!completed.final_output_path) {
                 throw new RuntimeError("SWARM_RESULT_MISSING", "Swarm (write) finished without a rendered result.", "swarm.result");
             }

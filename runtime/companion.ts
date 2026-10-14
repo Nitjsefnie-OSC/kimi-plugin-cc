@@ -1,3 +1,4 @@
+import { companionHelp } from "./help.js";
 import { runAsk } from "./commands/ask.js";
 import { runModelInventory } from "./commands/models.js";
 import { runCancel } from "./commands/cancel.js";
@@ -17,6 +18,11 @@ import { resolveKimiHome } from "./kimi-home.js";
 import type { CommandContext } from "./types.js";
 
 async function main(argv: string[]): Promise<void> {
+  const help = companionHelp(argv);
+  if (help !== undefined) {
+    process.stdout.write(`${help}\n`);
+    return;
+  }
   const [command, ...rest] = argv as [string | undefined, ...string[]];
   const cwd = process.env.KIMI_PLUGIN_CC_WORKSPACE_CWD || process.cwd();
   const context: CommandContext = {

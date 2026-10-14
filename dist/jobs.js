@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { RuntimeError } from "./errors.js";
-import { renderTerminalJobArtifact, writeArtifact } from "./render.js";
+import { formatBudgetDuration, renderTerminalJobArtifact, writeArtifact } from "./render.js";
 export function digestPrompt(prompt) {
     return createHash("sha256").update(prompt).digest("hex");
 }
@@ -30,10 +30,14 @@ export function normalizeJobError(error) {
     };
 }
 export async function markJobFailed(store, paths, job, error, summary = "Job failed.", options) {
+    if (options?.partialOutput) {
+        const label = job.command_type[0].toUpperCase() + job.command_type.slice(1);
+        summary = `${label} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
+    }
     const normalized = normalizeJobError(error);
     const phase = options?.phase;
     const artifactJob = {
-        ...job,
+        ...(store.getJob(job.job_id) ?? job),
         status: "failed",
         summary,
         error: normalized,
@@ -42,7 +46,7 @@ export async function markJobFailed(store, paths, job, error, summary = "Job fai
         kimi_pid: null,
         ...(phase !== undefined ? { phase } : {}),
     };
-    const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob));
+    const artifactPath = await writeArtifact(paths, artifactJob, renderTerminalJobArtifact(artifactJob, options?.partialOutput));
     return (store.markFailed(job.job_id, {
         summary,
         error: normalized,

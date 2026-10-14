@@ -656,6 +656,25 @@ export function requireSessionId(result, context) {
         },
     });
 }
+/** Settled timeout data; stream records are deliberately non-serializable. */
+export class ResponseTimeoutError extends RuntimeError {
+    constructor(budgetMs, stage, commandLabel, partialResult, cause) {
+        super("RESPONSE_TIMEOUT", `${stage} timed out after ${budgetMs}ms.`, stage, {
+            ...(cause instanceof Error ? { cause } : {}),
+            details: {
+                budget_ms: budgetMs,
+                command_label: commandLabel ?? null,
+                record_count: partialResult?.records.length ?? 0,
+                partial_output_chars: partialResult?.records.reduce((count, record) => count + (record.role === "assistant" && typeof record.content === "string" ? record.content.length : 0), 0) ?? 0,
+                aborted: true,
+                ...(partialResult ? { settled_post_abort: true } : {}),
+            },
+        });
+        this.name = "ResponseTimeoutError";
+        // Never serialize stream records into job error details or error envelopes.
+        Object.defineProperty(this, "partialResult", { value: partialResult, enumerable: false });
+    }
+}
 /**
  * Run `kimi -p` under a budget that also tells the subprocess to die
  * when the budget expires.
@@ -682,7 +701,8 @@ export function requireSessionId(result, context) {
  *     subprocess/tree teardown, then reject with
  *     `RuntimeError("RESPONSE_TIMEOUT", …)` matching the legacy
  *     `withTimeout` code shape.
- *   - Result success path is unchanged from `runCliPrompt`.
+ *   - A clean non-aborted exit-0 result wins same-tick budget expiry.
+ *     Otherwise a settled result on timeout is carried as partial output.
  */
 export async function runCliPromptWithBudget(opts, budgetMs, stage) {
     const controller = new AbortController();
@@ -698,12 +718,7 @@ export async function runCliPromptWithBudget(opts, budgetMs, stage) {
         controller.abort();
     }, budgetMs);
     timer.unref();
-    const timeoutError = (raceDetected = false) => new RuntimeError("RESPONSE_TIMEOUT", `${stage} timed out after ${budgetMs}ms${raceDetected ? " (race detected post-result)" : ""}.`, stage, {
-        details: {
-            budget_ms: budgetMs,
-            command_label: opts.commandLabel ?? null,
-        },
-    });
+    const timeoutError = (partialResult, cause) => new ResponseTimeoutError(budgetMs, stage, opts.commandLabel, partialResult, cause);
     try {
         let result;
         try {
@@ -714,13 +729,13 @@ export async function runCliPromptWithBudget(opts, budgetMs, stage) {
         }
         catch (error) {
             if (timeoutFired)
-                throw timeoutError();
+                throw timeoutError(undefined, error);
             throw error;
         }
-        if (timeoutFired) {
-            // The timer and close can become runnable in the same event-loop turn.
-            // Teardown has still completed because runCliPrompt settled first.
-            throw timeoutError(true);
+        if (timeoutFired && (result.aborted || result.exitCode !== 0)) {
+            // A clean, non-aborted result won the settle/timeout boundary and is success.
+            // Budget aborts normally resolve with records, after owned teardown settles.
+            throw timeoutError(result);
         }
         return result;
     }
@@ -770,6 +785,8 @@ function buildArgs(opts) {
 }
 function buildEnv(opts) {
     const env = { ...opts.env };
+    // 2.2.0 audit: ambient trust starts project MCP stdio servers outside PreToolUse.
+    delete env.KIMI_CODE_TRUST_WORKSPACE;
     // kimi-code 0.33.0 inverted its CLI engine default: an unflagged `kimi -p`
     // now selects native agent-core-v2, while this upstream-documented flag pins
     // the legacy-v1 path. Native v2 still has a final-allow plan-file path that

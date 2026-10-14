@@ -20,17 +20,42 @@ interface AvailabilityClassification {
   authProbe: "ok" | "failed";
 }
 
+const BUDGET_CEILING_MS = 24 * 60 * 60 * 1_000;
+
+function formatBudgetMs(ms: number): string {
+  if (ms % 3_600_000 === 0) return `${ms / 3_600_000}h`;
+  if (ms % 60_000 === 0) return `${ms / 60_000}m`;
+  return `${Math.ceil(ms / 1_000)}s`;
+}
+
+/**
+ * Suggest a concrete next budget from the one that just expired: double it,
+ * capped at the 24h ceiling. At the ceiling there is nothing left to raise,
+ * so the only honest advice is to narrow the prompt.
+ */
+function budgetAdvice(budgetMs: number | undefined): string {
+  if (budgetMs === undefined || !Number.isFinite(budgetMs) || budgetMs <= 0) return "raise the budget (`--budget <dur>`, at most 24h)";
+  if (budgetMs >= BUDGET_CEILING_MS) return "note the budget is already at the 24h ceiling, so narrowing the prompt is the only remaining lever";
+  return `raise the budget (e.g. \`--budget ${formatBudgetMs(Math.min(budgetMs * 2, BUDGET_CEILING_MS))}\`)`;
+}
+
 export function classifyManagedCommandFailure(
   error: unknown,
   commandType: ManagedCommandType | "review_gate",
   jobId: string,
-  options?: { preserveStage?: boolean },
+  options?: { preserveStage?: boolean; background?: boolean; budgetMs?: number },
 ): Error {
   const classification = classifyKimiAvailability(error);
   if (!classification) {
     return error instanceof Error ? error : new Error(String(error));
   }
 
+  if (classification.kind === "response_timeout" && commandType !== "review_gate" && options?.background !== undefined) {
+    const foregroundAdvice = !options?.background && (commandType === "ask" || commandType === "rescue")
+      ? " Or run with --background so the caller's shell timeout is not the limit."
+      : "";
+    classification.nextStep = `Narrow the prompt or ${budgetAdvice(options.budgetMs)}. Partial output, if any, is in the artifact (\`result ${jobId}\`).${foregroundAdvice}`;
+  }
   const label = formatCommandLabel(commandType);
   const stage =
     options?.preserveStage && error instanceof RuntimeError
@@ -46,6 +71,12 @@ export function classifyManagedCommandFailure(
   const details: Record<string, unknown> = { availability: classification.kind };
   if (error instanceof RuntimeError) {
     details.cause_code = error.code;
+    if (error.code === "RESPONSE_TIMEOUT") {
+      for (const key of ["budget_ms", "record_count", "partial_output_chars", "aborted", "settled_post_abort"]) {
+        if (error.details[key] !== undefined) details[key] = error.details[key];
+      }
+      if (details.budget_ms === undefined && options?.budgetMs !== undefined) details.budget_ms = options.budgetMs;
+    }
   }
   if (error instanceof Error && error.message.length > 0) {
     details.cause_message = truncateCauseMessageForDetails(error.message);
@@ -228,7 +259,7 @@ function classifyKimiAvailability(error: unknown): AvailabilityClassification | 
       return {
         kind: "response_timeout",
         summary: "Kimi started and accepted the prompt but never returned a final response.",
-        nextStep: "Reduce the prompt scope (or for /kimi:ask and /kimi:rescue, retry with --background to detach). If the response still hangs after a fresh run, check local Kimi version and report upstream.",
+        nextStep: "Narrow the prompt or raise the budget (`--budget <dur>`, at most 24h). Check the job artifact (`result <jobId>`) for any captured partial output. Backgrounding does not extend the runtime budget.",
         runtimeProbe: "ok",
         authProbe: "ok",
       };

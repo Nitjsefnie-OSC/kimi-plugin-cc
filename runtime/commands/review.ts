@@ -28,7 +28,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // v1.0 cutover note (PR 2):
@@ -107,6 +107,7 @@ export async function runReview(
     model: parsed.model ?? null,
     thinking: parsed.thinking ?? null,
     background: false,
+    budget_ms: parsed.budgetMs ?? null,
     pid: process.pid,
     kimi_pid: null,
     status: "running",
@@ -143,7 +144,7 @@ export async function runReview(
         logPath,
         signal: handlers.signal,
       },
-      KIMI_REVIEW_PROMPT_TIMEOUT_MS,
+      job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS,
       `${commandType}.prompt`,
     );
 
@@ -211,8 +212,9 @@ export async function runReview(
       await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
       throw cancelledError;
     }
-    const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
-    await markJobFailed(store, paths, job, classified, cancel.failedSummary);
+    const classified = classifyManagedCommandFailure(error, commandType, job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS });
+    const partialOutput = captureTimeoutPartialOutput(classified, store, job);
+    await markJobFailed(store, paths, job, classified, cancel.failedSummary, { partialOutput });
     throw classified;
   } finally {
     handlers.dispose();

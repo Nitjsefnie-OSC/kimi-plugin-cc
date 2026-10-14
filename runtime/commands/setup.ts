@@ -1,3 +1,4 @@
+import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
 // Managed-block installer for the kimi-code PreToolUse hook.
 //
 // Replaces the v0.4 Wire-based setup probe. In v1.0 the load-bearing
@@ -221,7 +222,7 @@ function parseArgs(argv: string[]): ParsedArgs {
       default:
         throw new RuntimeError(
           "INVALID_ARGS",
-          `Unknown setup flag ${token}. Supported flags: --check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate.`,
+          `Unknown setup flag ${token}. Supported flags: ${SETUP_SUPPORTED_FLAGS}.`,
           "setup.parse",
         );
     }

@@ -1,3 +1,4 @@
+import { REPAIR_SESSIONS_SUPPORTED_FLAGS } from "../parsing.js";
 import { constants } from "node:fs";
 import { lstat, open } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -29,7 +30,7 @@ export async function runRepairSessions(argv: string[], context: CommandContext)
   const seen = new Set<string>();
   for (const arg of argv) {
     if ((arg !== "--apply" && arg !== "--all") || seen.has(arg)) {
-      throw new RuntimeError("INVALID_ARGS", "Usage: repair-sessions [--apply] [--all]", "repair-sessions.args");
+      throw new RuntimeError("INVALID_ARGS", `Usage: repair-sessions. Supported flags: ${REPAIR_SESSIONS_SUPPORTED_FLAGS}.`, "repair-sessions.args");
     }
     seen.add(arg);
   }

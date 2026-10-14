@@ -61,6 +61,7 @@ function makeJob(commandType: ManagedCommandType): JobRecord {
     prompt_digest: "digest",
     summary: "running",
     phase: null,
+    budget_ms: null,
     final_output_path: null,
     stream_log_path: "stream.jsonl",
     error: null,

@@ -13,24 +13,24 @@
 // kimi-code spends real wallclock on extended reasoning before emitting
 // the first assistant record; pre-alpha.4 budgets (300s/600s) were sized
 // against the non-thinking path and timed out in production smoke
-// testing under default flags. Raised to 900/1800/1800 so a real
-// thinking-on review/rescue session has headroom; review-gate stays at
+// testing under default flags. Defaults are now 1800/1800/2700 seconds
+// for ask/review/rescue to allow repo-wide work; review-gate stays at
 // 8s because it fires inside Claude Code's Stop hook and is forced to
 // thinking-off in its own caller.
 
 /** Ask budget. Conversational; thinking-on free-form reasoning. */
-export const KIMI_ASK_PROMPT_TIMEOUT_MS = 900_000;
+export const KIMI_ASK_PROMPT_TIMEOUT_MS = 1_800_000; // 30 minutes
 /** Review/challenge budget. Thinking-on single-turn analysis over the workspace. */
 export const KIMI_REVIEW_PROMPT_TIMEOUT_MS = 1_800_000;
 /** Rescue budget. Thinking-on multi-step apply/test/verify loops. */
-export const KIMI_RESCUE_PROMPT_TIMEOUT_MS = 1_800_000;
+export const KIMI_RESCUE_PROMPT_TIMEOUT_MS = 2_700_000; // 45 minutes
 /**
  * Pursue (autonomous goal mode) DEFAULT wall-clock ceiling when the user
  * passes no `--budget`. This is the ONLY hard bound on an autonomous goal —
  * headless goal create sets no token/turn budget (only the model, via
- * SetGoalBudget, or this AbortController stops the loop). Larger than the
- * single-turn rescue budget (a goal spans multiple continuation turns) but
- * deliberately finite. Overridable per-job via `--budget` (parsed to ms in
+ * SetGoalBudget, or this AbortController stops the loop). The same duration as
+ * the single-turn rescue default, but a safety ceiling rather than a patience
+ * knob. Deliberately finite. Overridable per-job via `--budget` (parsed to ms in
  * parsePursueArgs). See runtime/commands/pursue.ts and docs/safety.md.
  */
 export const KIMI_PURSUE_DEFAULT_BUDGET_MS = 2_700_000; // 45 minutes

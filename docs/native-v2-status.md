@@ -1,11 +1,23 @@
-# Native v2 status — 2026-09-24
+# Native v2 status — 2026-10-14
 
-Plugin 2.0.6 certifies exact CLI 2.1.0 and 2.1.1 for all eight operations
-under the unchanged no-plan construction. Each version passed its own source
-scan, plan-ON/OFF controls and complete sequential candidate smoke. The active
-plan-file bypass persists. Version 2.1.1 rolls back much of 2.1.0's path/Git
-hardening to 2.0.2 behavior; trusted repository Git configuration remains an
-explicit boundary. See [evidence and limits](upstream-2.1-certification.md).
+Plugin 2.0.8 certifies exact CLI 2.2.0 for all eight operations under the
+unchanged no-plan construction, alongside every previously certified version
+(0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2, 2.1.0, 2.1.1). All twelve pinned
+construction/schema files are byte-identical to 2.1.1. Plan-ON still writes the
+plan file without a Write hook payload (the refusal remains load-bearing);
+plan-OFF denies Write and EnterPlanMode; the candidate smoke passed 15/15.
+Changed 2.2.0 surfaces are classified in the evidence: tower's two extra
+before-execute listeners are veto-only, the pre-existing `notify_user` flag
+stays inert under `-p`, and the new `KIMI_CODE_TRUST_WORKSPACE` is stripped
+from every child environment.
+See [evidence and limits](upstream-2.2.0-certification.md).
+
+> **2.1.0 / 2.1.1 (certified 2026-09-24, plugin 2.0.6):** both exact versions
+> passed their own source scan, plan-ON/OFF controls and complete sequential
+> candidate smoke under the unchanged no-plan construction. The active
+> plan-file bypass persists. Version 2.1.1 rolls back much of 2.1.0's path/Git
+> hardening to 2.0.2 behavior; trusted repository Git configuration remains an
+> explicit boundary. See [evidence and limits](upstream-2.1-certification.md).
 
 > **2.0.2 (certified 2026-09-20, plugin 2.0.4):** exact source `9d07f634`
 > retains the no-plan construction and unchanged hook schema. Four source

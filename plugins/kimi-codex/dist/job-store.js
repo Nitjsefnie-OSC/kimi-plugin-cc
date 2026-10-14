@@ -58,6 +58,7 @@ export class JobStore {
         prompt_digest TEXT NOT NULL,
         summary TEXT NOT NULL,
         phase TEXT,
+        budget_ms INTEGER,
         final_output_path TEXT,
         stream_log_path TEXT NOT NULL,
         error TEXT
@@ -65,6 +66,9 @@ export class JobStore {
     `);
             if (!tableHasColumn(this.db, "phase")) {
                 this.db.exec(`ALTER TABLE jobs ADD COLUMN phase TEXT;`);
+            }
+            if (!tableHasColumn(this.db, "budget_ms")) {
+                this.db.exec(`ALTER TABLE jobs ADD COLUMN budget_ms INTEGER;`);
             }
             // Additive provenance migration. Existing rows deliberately remain NULL:
             // v1.9.5 plus kimi-code 0.33/0.34 could have routed to native v2 before the
@@ -162,14 +166,14 @@ export class JobStore {
             background, pid, kimi_pid, status, kimi_session_id,
             operation_kind, intended_engine, observed_engine, kimi_version, system_version,
             kimi_command, kimi_prefix_args, plan_certification, resumed_from_job_id, safety_profile,
-            agent_profile, prompt_digest, summary, phase, final_output_path, stream_log_path, error
+            agent_profile, prompt_digest, summary, phase, budget_ms, final_output_path, stream_log_path, error
           )
           VALUES (
             @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
             @background, @pid, @kimi_pid, @status, @kimi_session_id,
             @operation_kind, @intended_engine, @observed_engine, @kimi_version, @system_version,
             @kimi_command, @kimi_prefix_args, @plan_certification, @resumed_from_job_id, @safety_profile,
-            @agent_profile, @prompt_digest, @summary, @phase, @final_output_path, @stream_log_path, @error
+            @agent_profile, @prompt_digest, @summary, @phase, @budget_ms, @final_output_path, @stream_log_path, @error
           )
         `, {
                 ...serializeRecord(input),
@@ -276,7 +280,7 @@ export class JobStore {
         return this.updateWhere(jobId, { ...patch, status: "cancelled", pid: null, kimi_pid: null }, "status = 'running'");
     }
     static JOBS_COLUMNS = new Set([
-        "status", "summary", "phase", "pid", "kimi_pid",
+        "status", "summary", "phase", "budget_ms", "pid", "kimi_pid",
         "final_output_path", "stream_log_path", "kimi_session_id",
         "error", "command_type", "prompt_digest", "repo_id",
         "cwd", "model", "thinking", "background", "agent_profile",
@@ -320,6 +324,7 @@ function serializeRecord(record) {
     return {
         ...record,
         phase: record.phase ?? null,
+        budget_ms: record.budget_ms ?? null,
         operation_kind: record.operation_kind ?? null,
         intended_engine: record.intended_engine ?? null,
         observed_engine: record.observed_engine ?? null,

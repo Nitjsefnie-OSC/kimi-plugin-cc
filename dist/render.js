@@ -126,7 +126,16 @@ export function renderReviewGateArtifact(job, output) {
     }
     return `${lines.join("\n")}\n`;
 }
-export function renderTerminalJobArtifact(job) {
+export function formatBudgetDuration(ms) {
+    if (ms % 3_600_000 === 0)
+        return `${ms / 3_600_000}h`;
+    if (ms % 60_000 === 0)
+        return `${ms / 60_000}m`;
+    if (ms % 1_000 === 0)
+        return `${ms / 1_000}s`;
+    return `${ms}ms`;
+}
+export function renderTerminalJobArtifact(job, partialOutput) {
     const lines = [
         `# ${capitalize(job.status)} Job`,
         "",
@@ -148,6 +157,15 @@ export function renderTerminalJobArtifact(job) {
                 lines.push(`- ${key}: ${JSON.stringify(details[key])}`);
             }
         }
+    }
+    if (partialOutput) {
+        lines.push("", `## Partial output (budget exhausted after ${formatBudgetDuration(partialOutput.budgetMs)} — NOT a final answer)`, "", partialOutput.text.trim()
+            ? partialOutput.text
+            : partialOutput.recordCount === 0
+                ? "No stream records arrived before the budget expired (the model had not produced any output yet)."
+                : partialOutput.toolCalls
+                    ? "No assistant prose was emitted before the budget (tool calls only)."
+                    : "No assistant prose was emitted before the budget.");
     }
     return lines.join("\n");
 }

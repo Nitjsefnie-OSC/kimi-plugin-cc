@@ -21,8 +21,13 @@ function looksLikeFlag(token) {
     // Short flag: a single dash followed by exactly one letter (`-r`, `-m`).
     return /^-[a-zA-Z]$/.test(token);
 }
-const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
-const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+export const ASK_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+export const RESCUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --budget <30m|1h|90s>";
+export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
+export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags)";
+export const REPAIR_SESSIONS_SUPPORTED_FLAGS = "--apply, --all";
+export const REPLAY_SUPPORTED_FLAGS = "none (one job-id required)";
 // Thinking-on is always-on for user-facing commands in v1.0. review-gate
 // pins thinking=false via the cli-client options bag instead of an argv
 // flag (see runtime/cli-client.ts::CliClientOptions). The parser rejects
@@ -39,8 +44,8 @@ function isRemovedThinkingFlag(token) {
         token.startsWith("--thinking=") ||
         token.startsWith("--no-thinking="));
 }
-const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
-const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
+export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
+export const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 /**
  * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
  * no --background/--fresh/--resume. Trailing tokens are the objective.
@@ -85,7 +90,7 @@ export function parseSwarmArgs(argv) {
                 if (!value || value.startsWith("-")) {
                     throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "swarm.parse");
                 }
-                budgetMs = parseDurationMs(value, "--budget");
+                budgetMs = parseDurationMs(value, "--budget", "swarm.parse", "safety");
                 index += 1;
                 break;
             }
@@ -154,20 +159,23 @@ export const MAX_DURATION_MS = 24 * 60 * 60 * 1_000;
  * into milliseconds. Throws INVALID_ARGS on a malformed, non-positive, or
  * absurdly large value (> {@link MAX_DURATION_MS}).
  */
-export function parseDurationMs(token, flag) {
+export function parseDurationMs(token, flag, stage, budgetKind) {
+    const limitReason = budgetKind === "safety"
+        ? "the budget is a safety ceiling, not a scheduler"
+        : "the budget is a response-time limit; a timed-out job is still a safe failure";
     const match = /^(\d+)(s|m|h)?$/.exec(token.trim());
     if (!match) {
-        throw new RuntimeError("INVALID_ARGS", `${flag} expects a duration like 30m, 1h, or 90s (bare number = minutes); got "${token}".`, "pursue.parse");
+        throw new RuntimeError("INVALID_ARGS", `${flag} expects a duration like 30m, 1h, or 90s (bare number = minutes); got "${token}".`, stage);
     }
     const value = Number(match[1]);
     const unit = match[2] ?? "m";
     if (!Number.isFinite(value) || value <= 0) {
-        throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive duration.`, "pursue.parse");
+        throw new RuntimeError("INVALID_ARGS", `${flag} must be a positive duration.`, stage);
     }
     const unitMs = unit === "s" ? 1_000 : unit === "h" ? 3_600_000 : 60_000;
     const ms = value * unitMs;
     if (ms > MAX_DURATION_MS) {
-        throw new RuntimeError("INVALID_ARGS", `${flag} must be at most 24h (got "${token}"); the budget is a safety ceiling, not a scheduler.`, "pursue.parse");
+        throw new RuntimeError("INVALID_ARGS", `${flag} must be at most 24h (got "${token}"); ${limitReason}.`, stage);
     }
     return ms;
 }
@@ -211,7 +219,7 @@ export function parsePursueArgs(argv) {
                 if (!value || value.startsWith("-")) {
                     throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "pursue.parse");
                 }
-                budgetMs = parseDurationMs(value, "--budget");
+                budgetMs = parseDurationMs(value, "--budget", "pursue.parse", "safety");
                 index += 1;
                 break;
             }
@@ -248,7 +256,38 @@ export function parsePursueArgs(argv) {
         objective: trailingTokens?.join(" "),
     };
 }
+/** Help before -- wins even over malformed flags or prose trailing-token mode. */
+const VALUE_TAKING_FLAGS = new Set(["-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
+/**
+ * `--help` / `-h` counts only inside the leading flag region: before `--`
+ * and before the first prose token. The value of a value-taking flag is
+ * skipped, so `-m kimi -h` is still a help request (`kimi` is a value, not
+ * prose) and `--budget --help` asks for help rather than failing on a bad
+ * duration. Once prose starts (`ask what does du -h print`), nothing after it
+ * is a flag — the whole remainder is the prompt.
+ */
+export function hasHelpFlag(argv) {
+    for (let index = 0; index < argv.length; index += 1) {
+        const token = argv[index];
+        if (token === "--")
+            return false;
+        if (token === "--help" || token === "-h")
+            return true;
+        if (!token.startsWith("-"))
+            return false;
+        if (VALUE_TAKING_FLAGS.has(token)) {
+            const value = argv[index + 1];
+            if (value === "--help" || value === "-h")
+                return true;
+            index += 1;
+        }
+    }
+    return false;
+}
 export function parseAskArgs(argv) {
+    if (hasHelpFlag(argv))
+        return { help: true, background: false, wait: false, fresh: false, resume: false };
+    let budgetMs;
     let model;
     // Thinking is on by default across ask/review/challenge/rescue. The
     // parser rejects --thinking / --no-thinking; review-gate's runtime
@@ -272,6 +311,15 @@ export function parseAskArgs(argv) {
             break;
         }
         switch (token) {
+            case "--budget": {
+                const value = argv[index + 1];
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "ask.parse");
+                }
+                budgetMs = parseDurationMs(value, "--budget", "ask.parse", "response");
+                index += 1;
+                break;
+            }
             case "-m":
             case "--model": {
                 const value = argv[index + 1];
@@ -327,6 +375,7 @@ export function parseAskArgs(argv) {
         throw new RuntimeError("INVALID_ARGS", "--resume only accepts a job-id or session-id. Use -r to resume the latest ask session with a prompt.", "ask.parse");
     }
     return {
+        budgetMs,
         background,
         wait,
         fresh,
@@ -338,8 +387,9 @@ export function parseAskArgs(argv) {
     };
 }
 export function parseReviewArgs(argv, commandName = "review") {
-    const parsed = parseKnownFlags(argv, new Set(["--base", "--background", "--wait", "-m", "--model"]), commandName);
+    const parsed = parseKnownFlags(argv, new Set(["--budget", "--base", "--background", "--wait", "-m", "--model"]), commandName);
     return {
+        budgetMs: parsed.budgetMs,
         base: parsed.base,
         background: parsed.background,
         wait: parsed.wait,
@@ -349,6 +399,9 @@ export function parseReviewArgs(argv, commandName = "review") {
     };
 }
 export function parseRescueArgs(argv) {
+    if (hasHelpFlag(argv))
+        return { help: true, background: false, wait: false, fresh: false, resume: false };
+    let budgetMs;
     let model;
     let thinking = true;
     let background = false;
@@ -369,6 +422,15 @@ export function parseRescueArgs(argv) {
             break;
         }
         switch (token) {
+            case "--budget": {
+                const value = argv[index + 1];
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", "rescue.parse");
+                }
+                budgetMs = parseDurationMs(value, "--budget", "rescue.parse", "response");
+                index += 1;
+                break;
+            }
             case "-m":
             case "--model": {
                 const value = argv[index + 1];
@@ -424,6 +486,7 @@ export function parseRescueArgs(argv) {
         throw new RuntimeError("INVALID_ARGS", "--resume only accepts a job-id or session-id. Use -r to resume the latest rescue session with a prompt.", "rescue.parse");
     }
     return {
+        budgetMs,
         background,
         wait,
         fresh,
@@ -454,7 +517,7 @@ export function parseJobLookupArgs(argv) {
             continue;
         }
         if (token.startsWith("-")) {
-            throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token}. Supported flags: --type <review|challenge|rescue|review_gate|ask>, --json.`, "args.parse");
+            throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token}. Supported flags: ${JOB_LOOKUP_SUPPORTED_FLAGS}.`, "args.parse");
         }
         if (jobId) {
             throw new RuntimeError("INVALID_ARGS", "Only one optional job id may be supplied.", "args.parse");
@@ -475,6 +538,7 @@ function isManagedCommandType(value) {
         value === "ask");
 }
 function parseKnownFlags(argv, knownFlags, commandName) {
+    let budgetMs;
     let model;
     let thinking = true;
     let base;
@@ -497,12 +561,21 @@ function parseKnownFlags(argv, knownFlags, commandName) {
                 // slurping them into focus text produced a bloated prompt that
                 // looked like a hang. Hard-fail with the supported list inline so
                 // the error message itself is the correction.
-                throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${commandName}. Supported flags: --base <ref>, -m/--model <name>. Use \`--\` before flag-shaped focus text to pass it through.`, "args.parse");
+                throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${commandName}. Supported flags: ${REVIEW_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped focus text to pass it through.`, "args.parse");
             }
             trailingTokens = argv.slice(index);
             break;
         }
         switch (token) {
+            case "--budget": {
+                const value = argv[index + 1];
+                if (!value || value.startsWith("-")) {
+                    throw new RuntimeError("INVALID_ARGS", "--budget requires a duration (e.g. 30m, 1h, 90s).", `${commandName}.parse`);
+                }
+                budgetMs = parseDurationMs(value, "--budget", `${commandName}.parse`, "response");
+                index += 1;
+                break;
+            }
             case "-m":
             case "--model": {
                 const value = argv[index + 1];
@@ -543,6 +616,7 @@ function parseKnownFlags(argv, knownFlags, commandName) {
         }
     }
     return {
+        budgetMs,
         base,
         background,
         wait,

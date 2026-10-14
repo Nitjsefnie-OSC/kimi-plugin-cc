@@ -1,3 +1,4 @@
+import { companionHelp } from "../help.js";
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 
@@ -30,7 +31,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // v1.0 cutover note (PR 2):
@@ -72,6 +73,7 @@ interface AskSessionResolution {
 
 export async function runAsk(argv: string[], context: CommandContext): Promise<string> {
   const parsed = parseAskArgs(argv);
+  if (parsed.help) return companionHelp(["ask", ...argv])!;
   if (context.env.KIMI_PLUGIN_CC_SKIP_HOOK_CHECK !== "1") {
     await requireAskHookInstalled(context);
   }
@@ -110,6 +112,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       model: parsed.model ?? null,
       thinking: parsed.thinking ?? null,
       background: parsed.background,
+      budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "ask" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
       pid: parsed.background ? null : process.pid,
       kimi_pid: null,
       status: "running",
@@ -224,7 +227,7 @@ export async function executeAskJob(
         logPath: job.stream_log_path,
         signal: handlers.signal,
       },
-      KIMI_ASK_PROMPT_TIMEOUT_MS,
+      job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS,
       "ask.prompt",
     );
 
@@ -312,8 +315,9 @@ export async function executeAskJob(
       await markJobFailed(store, paths, job, error, cancel.failedSummary, { phase: "failed" });
       throw error;
     }
-    const classified = classifyManagedCommandFailure(error, "ask", job.job_id);
-    await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed" });
+    const classified = classifyManagedCommandFailure(error, "ask", job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS });
+    const partialOutput = captureTimeoutPartialOutput(classified, store, job);
+    await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed", partialOutput });
     throw classified;
   } finally {
     handlers?.dispose();

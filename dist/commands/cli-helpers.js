@@ -1,4 +1,6 @@
 import { RuntimeError } from "../errors.js";
+import { ResponseTimeoutError } from "../cli-client.js";
+import { observedExecutionFields } from "../kimi-engine.js";
 /**
  * Reassemble prose final text from cli-client records.
  *
@@ -109,4 +111,33 @@ export function assertCliResultSuccess(result, stage) {
             },
         });
     }
+}
+/** Timeout-only capture, called after cancellation has taken precedence. No title sync on failure. */
+export function captureTimeoutPartialOutput(classified, store, job) {
+    const timeout = classified.cause;
+    if (!(timeout instanceof ResponseTimeoutError) || !timeout.partialResult)
+        return undefined;
+    const result = timeout.partialResult;
+    // Best-effort metadata only. The row is still `running`, and a session id
+    // written here can collide with `jobs_running_session_idx` when a resume of
+    // the same session was started while this job ran. A store error must never
+    // prevent markJobFailed from running — the partial artifact matters more
+    // than the metadata, so swallow and fall through.
+    try {
+        store.updateRunningJob(job.job_id, observedExecutionFields(result));
+        if (result.sessionId !== undefined && result.sessionId.length > 0 && result.sessionId !== job.kimi_session_id) {
+            store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        }
+    }
+    catch {
+        // Diagnostics stay in the stream log; the failure transition proceeds.
+    }
+    return {
+        text: reassembleProseFromRecords(result.records),
+        toolCalls: result.records.some((record) => record.role === "tool" ||
+            (record.role === "assistant" && Array.isArray(record.tool_calls) &&
+                record.tool_calls.length > 0)),
+        recordCount: result.records.length,
+        budgetMs: timeout.details.budget_ms,
+    };
 }

@@ -1,6 +1,6 @@
 ---
 description: Ask Kimi a read-only question in free-form prose mode.
-argument-hint: "[--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] <prompt>"
+argument-hint: "[--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] <prompt>"
 disable-model-invocation: true
 ---
 
@@ -10,6 +10,8 @@ Run the companion with any user-supplied flags appended after `ask`:
 
 Supported flags:
 
+- `--budget <dur>` — wall-clock ceiling (default 30m; `30m`, `1h`, `90s`, or bare minutes; maximum 24h)
+
 - `--background` — spawn as a background job and return `{job_id}` immediately
 - `--wait` — combined with `--background`, block until terminal state and return the rendered answer
 - `-r` — resume the latest ask session for the current repo; any trailing text becomes the next prompt
@@ -17,7 +19,9 @@ Supported flags:
 - `--fresh` — force a new ask session id instead of reusing a prior session
 - `-m`, `--model <name>`
 
-Reasoning behavior follows the selected model and Kimi configuration. The plugin does not force a thinking mode. The 15-minute budget leaves room for extended reasoning.
+Reasoning behavior follows the selected model and Kimi configuration. The plugin does not force a thinking mode. The default budget is 30m; use `--budget` to change it. Backgrounding does not extend the runtime budget.
+
+A budget timeout leaves the job `failed` and saves any partial assistant prose in its artifact, labeled **NOT a final answer**. Read it with `result <jobId>` or `result <jobId> --json`; tool-only runs explicitly report no assistant prose. A session ID is kept only if Kimi announced it before the deadline; native v2 announces it at session end, so a timed-out v2 turn is normally not resumable from the plugin. Cancellation does not capture partial output. A resume without `--budget` inherits the parent job's budget; an explicit budget overrides it. Use `--help` or `-h` among the leading flags for usage; once prompt text starts, `-h` is part of the prompt. Other failures (nonzero exit, cancellation) do not capture partial output.
 
 Return the companion stdout verbatim.
 

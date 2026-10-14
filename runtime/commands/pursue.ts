@@ -188,6 +188,7 @@ export async function runPursue(argv: string[], context: CommandContext): Promis
       model: parsed.model ?? null,
       thinking: parsed.thinking ?? null,
       background: false,
+      budget_ms: parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS,
       pid: process.pid,
       kimi_pid: null,
       status: "running",
@@ -223,7 +224,7 @@ export async function runPursue(argv: string[], context: CommandContext): Promis
       job.job_id,
       prompt,
       objective,
-      parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS,
+      job.budget_ms!,
       context,
     );
     if (!completed.final_output_path) {

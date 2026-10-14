@@ -1,6 +1,6 @@
 ---
 description: Run a read-only Kimi challenge review that challenges assumptions and surfaces safer alternatives.
-argument-hint: "[--base <ref>] [-m <model>] [extra prose]"
+argument-hint: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [extra prose]"
 disable-model-invocation: true
 ---
 
@@ -10,11 +10,15 @@ Run the companion with any user-supplied flags appended after `task challenge`:
 
 Supported flags:
 
+- `--budget <dur>` — wall-clock ceiling (default 30m; `30m`, `1h`, `90s`, or bare minutes; maximum 24h)
+
 - `--base <ref>` — challenge against a branch/commit diff instead of the working tree
 - `-m`, `--model <name>`
 - trailing text — adversarial focus or framing to steer the challenge
 
-Reasoning behavior follows the selected model and Kimi configuration. The plugin does not force a thinking mode. Budget is 30 min so adversarial review has time to dig. Challenge runs foreground-synchronously; it does not support `--background` or `--wait`.
+Reasoning behavior follows the selected model and Kimi configuration. The plugin does not force a thinking mode. The default budget is 30m; use `--budget` to change it. Challenge runs foreground-synchronously; it does not support `--background` or `--wait`.
+
+A budget timeout leaves the job `failed` and saves any partial assistant prose in its artifact, labeled **NOT a final answer**. Read it with `result <jobId>` or `result <jobId> --json`; tool-only runs explicitly report no assistant prose. A session ID is kept only if Kimi announced it before the deadline; native v2 announces it at session end, so a timed-out v2 turn is normally not resumable from the plugin. Cancellation does not capture partial output. Use `--help` or `-h` among the leading flags for usage; once prompt text starts, `-h` is part of the prompt. Other failures (nonzero exit, cancellation) do not capture partial output.
 
 Return the companion stdout verbatim.
 

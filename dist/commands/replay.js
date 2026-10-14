@@ -1,3 +1,4 @@
+import { REPLAY_SUPPORTED_FLAGS } from "../parsing.js";
 import { access, stat, readFile } from "node:fs/promises";
 import { constants as fsConstants } from "node:fs";
 import { RuntimeError } from "../errors.js";
@@ -9,8 +10,8 @@ import { sweepStaleJobs } from "../jobs.js";
 const MAX_REPLAY_LOG_BYTES = 32 * 1024 * 1024;
 export async function runReplay(argv, context) {
     const [jobId, ...rest] = argv;
-    if (!jobId || rest.length > 0) {
-        throw new RuntimeError("INVALID_ARGS", "replay expects exactly one job id: replay <job-id>.", "replay.parse");
+    if (!jobId || jobId.startsWith("-") || rest.length > 0) {
+        throw new RuntimeError("INVALID_ARGS", `replay expects exactly one job id: replay <job-id>. Supported flags: ${REPLAY_SUPPORTED_FLAGS}.`, "replay.parse");
     }
     const paths = resolvePluginPaths(context.env);
     await ensurePluginPaths(paths);

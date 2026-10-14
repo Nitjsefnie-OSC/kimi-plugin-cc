@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 
 import { RuntimeError } from "../../runtime/errors.js";
-import { classifyManagedCommandFailure, summarizeKimiAvailabilityWarning } from "../../runtime/kimi-errors.js";
+import { classifyManagedCommandFailure, classifySetupFailure, summarizeKimiAvailabilityWarning } from "../../runtime/kimi-errors.js";
 
 describe("classifyManagedCommandFailure", () => {
   test("returns the original error when classification does not recognize it", () => {
@@ -264,4 +264,34 @@ describe("summarizeKimiAvailabilityWarning", () => {
   ])("returns an explicit warning for $expected", ({ error, expected }) => {
     expect(summarizeKimiAvailabilityWarning(error, "review_gate")).toBe(expected);
   });
+});
+
+for (const command of ["ask", "rescue", "review", "challenge"] as const) {
+  for (const background of [false, true]) {
+    test(`${command} timeout advice reflects background=${background}`, () => {
+      const inner = new RuntimeError("RESPONSE_TIMEOUT", "budget elapsed", "prompt", {
+        details: { budget_ms: 60_000, record_count: 3, partial_output_chars: 42, aborted: true },
+      });
+      const error = classifyManagedCommandFailure(inner, command, "timeout-job", { background, budgetMs: 60_000 }) as RuntimeError;
+      expect(error.code).toBe(`${command.toUpperCase()}_KIMI_RESPONSE_TIMEOUT`);
+      expect(error.message).toContain("--budget 2m");
+      expect(error.message).toContain("result timeout-job");
+      expect(error.message.includes("--background")).toBe(!background && (command === "ask" || command === "rescue"));
+      expect(error.details).toMatchObject(inner.details);
+      expect(error.cause).toBe(inner);
+    });
+  }
+}
+
+test("source timeout advice is correct for consumers without managed-command context", () => {
+  const error = new RuntimeError("RESPONSE_TIMEOUT", "budget exhausted", "prompt", { details: { settled_post_abort: true } });
+  const source = classifySetupFailure(error)!;
+  expect(source.nextStep).toContain("--budget <dur>");
+  expect(source.nextStep).toContain("result <jobId>");
+  expect(source.nextStep).not.toContain("--background");
+  for (const command of ["ask", "rescue", "review", "challenge", "review_gate"] as const) {
+    const classified = classifyManagedCommandFailure(error, command, "job") as RuntimeError;
+    expect(classified.message).not.toContain("retry with --background");
+    expect(classified.details.settled_post_abort).toBe(true);
+  }
 });

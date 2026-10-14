@@ -1,5 +1,8 @@
 import { RuntimeError } from "../errors.js";
-import type { CliClientResult } from "../cli-client.js";
+import { ResponseTimeoutError, type CliClientResult } from "../cli-client.js";
+import { observedExecutionFields } from "../kimi-engine.js";
+import type { JobRecord, JobStore } from "../job-store.js";
+import type { PartialJobOutput } from "../render.js";
 import type { StreamJsonRecord } from "../stream-json.js";
 
 /**
@@ -130,4 +133,37 @@ export function assertCliResultSuccess(result: CliClientResult, stage: string): 
       },
     );
   }
+}
+
+/** Timeout-only capture, called after cancellation has taken precedence. No title sync on failure. */
+export function captureTimeoutPartialOutput(
+  classified: Error,
+  store: JobStore,
+  job: JobRecord,
+): PartialJobOutput | undefined {
+  const timeout = classified.cause;
+  if (!(timeout instanceof ResponseTimeoutError) || !timeout.partialResult) return undefined;
+  const result = timeout.partialResult;
+  // Best-effort metadata only. The row is still `running`, and a session id
+  // written here can collide with `jobs_running_session_idx` when a resume of
+  // the same session was started while this job ran. A store error must never
+  // prevent markJobFailed from running — the partial artifact matters more
+  // than the metadata, so swallow and fall through.
+  try {
+    store.updateRunningJob(job.job_id, observedExecutionFields(result));
+    if (result.sessionId !== undefined && result.sessionId.length > 0 && result.sessionId !== job.kimi_session_id) {
+      store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+    }
+  } catch {
+    // Diagnostics stay in the stream log; the failure transition proceeds.
+  }
+  return {
+    text: reassembleProseFromRecords(result.records),
+    toolCalls: result.records.some((record) =>
+      record.role === "tool" ||
+      (record.role === "assistant" && Array.isArray((record as { tool_calls?: unknown[] }).tool_calls) &&
+        ((record as { tool_calls?: unknown[] }).tool_calls as unknown[]).length > 0)),
+    recordCount: result.records.length,
+    budgetMs: timeout.details.budget_ms as number,
+  };
 }

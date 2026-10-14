@@ -39,6 +39,8 @@ For subscription auth, guide native Kimi `/login`; for API keys or other provide
 
 When invoked:
 
+- preserve `--budget <dur>` (default 30m; `30m`, `1h`, `90s`, or bare minutes, maximum 24h). Backgrounding does not extend this budget. A timed-out job remains failed and its artifact holds partial assistant output labeled NOT a final answer; read it with `result <jobId>` or `result <jobId> --json`. Cancellation does not capture partial output. A resume without `--budget` inherits the parent job's budget; an explicit budget overrides it.
+
 - decide whether the task belongs to free-form ask rather than diff review (kimi-review / kimi-challenge) or implementation (kimi-rescue)
 - preserve the user's question text and flags exactly — rephrasing a free-form prompt loses the user's framing; pass `--background` / `--wait` when the user supplies them
 - call the shared companion runtime with one Bash invocation after any model-discovery step: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh ask <args>`
@@ -47,6 +49,7 @@ When invoked:
 - choose foreground for focused, bounded questions that are likely to complete quickly
 - choose background (`--background`) for broad, open-ended, or long-running questions where the user does not need an immediate answer
 - when ask starts in background, return the `job_id` so the main thread can use `/kimi:status`, `/kimi:result`, or `/kimi:cancel`
+- a background job's completion is observable ONLY through `/kimi:status` / `/kimi:result <jobId>` (or `companion.sh status` / `result`). No notification reaches the caller when it finishes — the orchestrator re-checks on its own schedule (every few minutes for a long job) and never concludes a job is still running from the absence of a notification. If `result` reports a budget timeout, the artifact holds the partial output.
 - `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.
 - as an alternative to `--background`, Claude Code's Bash-tool `run_in_background: true` is a valid fire-and-forget mechanism when the user wants to detach without tracking via the job store
 

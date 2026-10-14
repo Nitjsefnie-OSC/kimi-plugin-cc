@@ -2,6 +2,30 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.0.8 — 2026-10-14
+
+- Certify exact Kimi Code CLI 2.2.0 (`472192c3`) for all eight native-v2 operations under the
+  unchanged no-plan construction: four source reviews, 15/15 tag scan (all twelve pinned files
+  byte-identical to 2.1.1), plan-ON/OFF controls (bypass still reproduced; refusal still
+  load-bearing) and the full 15-test candidate smoke. Accept only the reviewed exact 2.2.0 hook
+  schema. See [certification evidence](docs/upstream-2.2.0-certification.md).
+- Add per-job `--budget` to ask, rescue, review, and challenge, with
+  defaults of 30m for ask/review/challenge and 45m for rescue, with a 24h ceiling. Detached workers
+  reload the persisted budget from SQLite; resumes inherit it unless overridden.
+  Pursue/swarm persist their effective ceilings. Backgrounding does not extend it.
+- Preserve settled partial assistant output on budget timeout (and the session ID
+  when Kimi announced it before the deadline; native v2 announces at session end). Jobs remain failed, artifacts label partial output as NOT a final
+  answer, and cancellation does not capture partial output.
+- Preserve clean, non-aborted exit-0 success at the timeout boundary; retain
+  `settled_post_abort` diagnostics for timeouts. Strip ambient workspace-trust
+  overrides from every child to prevent project MCP bootstrap outside tool hooks.
+- Remove misleading timeout race wording, expose budget/count metrics, and give
+  context-aware budget/scope advice with a pointer to the failed artifact.
+- Add stdout `--help`/`-h` for companion subcommands from shared flag definitions.
+  Review and challenge remain foreground-only.
+- Regenerate both host distributions and document budget and partial-output
+  behavior across commands, agents, and Codex skills.
+
 ## 2.0.7 — 2026-09-26
 
 - Add npm distribution as `kimi-plugin-cc`, with an explicit file allowlist and

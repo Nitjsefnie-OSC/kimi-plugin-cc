@@ -91,6 +91,9 @@ async function main(): Promise<void> {
   // Match kimi-code's stderr session announce so cli-client's regex
   // (extractSessionIdFromStderr) captures the id.
   process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
+  // Emit work and the resume hint before holding, to exercise budget capture.
+  const postOutputDelay = Number(process.env.KIMI_PLUGIN_CC_MOCK_POST_OUTPUT_DELAY_MS ?? "0");
+  if (postOutputDelay > 0) await sleep(postOutputDelay);
   process.exit(0);
 }
 

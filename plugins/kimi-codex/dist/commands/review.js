@@ -17,7 +17,7 @@ import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // v1.0 cutover note (PR 2):
 //
@@ -81,6 +81,7 @@ export async function runReview(argv, context, commandType) {
         model: parsed.model ?? null,
         thinking: parsed.thinking ?? null,
         background: false,
+        budget_ms: parsed.budgetMs ?? null,
         pid: process.pid,
         kimi_pid: null,
         status: "running",
@@ -113,7 +114,7 @@ export async function runReview(argv, context, commandType) {
             model: parsed.model,
             logPath,
             signal: handlers.signal,
-        }, KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
+        }, job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
         if (handlers.cancelling) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, `${commandType}.runtime`);
@@ -163,8 +164,9 @@ export async function runReview(argv, context, commandType) {
             await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
             throw cancelledError;
         }
-        const classified = classifyManagedCommandFailure(error, commandType, job.job_id);
-        await markJobFailed(store, paths, job, classified, cancel.failedSummary);
+        const classified = classifyManagedCommandFailure(error, commandType, job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS });
+        const partialOutput = captureTimeoutPartialOutput(classified, store, job);
+        await markJobFailed(store, paths, job, classified, cancel.failedSummary, { partialOutput });
         throw classified;
     }
     finally {
