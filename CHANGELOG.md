@@ -25,6 +25,11 @@
   Review and challenge remain foreground-only.
 - Regenerate both host distributions and document budget and partial-output
   behavior across commands, agents, and Codex skills.
+- Bump the test-only `smol-toml` dependency 1.8.0 → 1.9.1 for GHSA-r4xh-jqrq-34v2
+  (quadratic `parseKey`). The vendored 1.6.1 parser subset that the plugin ships shares
+  the bounded quadratic behaviour on the operator's own `config.toml` only; measured and
+  documented in `runtime/vendor/smol-toml/README.md`, with the 1.9.x port scheduled as its
+  own integration review.
 
 ## 2.0.7 — 2026-09-26
 
