@@ -6,7 +6,9 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-As of September 26, 2026, [2.0.7 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.0.7).
+As of October 15, 2026, [2.0.8 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.0.8), published through
+GitHub Actions OIDC with a signed provenance statement (run 38650044033). 2.0.7 (September 26) was the
+hand-published bootstrap.
 The first upload used the validated GitHub Actions artifact and interactive npm
 authentication. Its public tarball matched that artifact byte-for-byte, and a
 fresh registry install passed isolated setup/check for both hosts.
@@ -25,10 +27,14 @@ and publishes an anchored `./` path), and the manual re-dispatch then received
 `404 Not Found - PUT https://registry.npmjs.org/kimi-plugin-cc`, the response
 npm gives when the OIDC token exchange is refused. The GitHub Actions side
 checks out (environment `npm` exists with no protection rules;
-`NPM_TRUSTED_PUBLISHING=true`), so the trusted-publisher binding on npmjs.com is
-the next thing to verify, then `gh workflow run publish.yml -f tag=v2.0.8`.
-Until it succeeds the registry serves 2.0.7, which refuses kimi-code 2.2.0; the
-GitHub marketplaces serve 2.0.8. Note that a `release` event runs the workflow
+`NPM_TRUSTED_PUBLISHING=true`), so the cause was on npmjs.com: the trusted-publisher binding created on
+September 26 had **expired unused** (npm expires a binding that never publishes).
+Deleting it and creating a new one (GitHub Actions, `linxule` / `kimi-plugin-cc` /
+`publish.yml` / environment `npm`, with *Allow npm publish* ticked) and
+dispatching `publish.yml` with `tag=v2.0.8` published 2.0.8 with provenance. A new
+binding shows *Pending validation* until its first publish, which must happen
+within about a day; publish promptly after creating one, and expect to recreate it
+after a long gap between releases. Note that a `release` event runs the workflow
 file at the tag, so fixes to `publish.yml` reach an existing tag only through
 `workflow_dispatch`.
 

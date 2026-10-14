@@ -9,6 +9,7 @@ coverage/
 runtime/dev-data/
 .claude
 .claude.nosync/
+.git.nosync/
 
 # iCloud sync-conflict copies (repo lives under ~/Documents/, which iCloud syncs).
 # iCloud renames conflicts "<name> 2.js", "<name> 3.js", "LICENSE 4", etc. — match
