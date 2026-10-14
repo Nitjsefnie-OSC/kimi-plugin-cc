@@ -253,6 +253,27 @@ worktree. A directory the operator trusted interactively in the Kimi TUI still
 has that property; that persisted-trust route is a documented residual, not
 something the plugin can close.
 
+## Running a newer Kimi than the plugin certifies
+
+The plugin refuses any kimi-code version it has not certified, so an operator
+who tracks `@latest` loses every `/kimi:*` command until the next certification.
+The clean way to have both is to give the plugin its own binary: install the
+highest certified version somewhere stable and point `KIMI_PLUGIN_CC_KIMI_BIN`
+at it (the runtime resolves that path instead of `kimi` on `PATH`; every spawn
+still exports `KIMI_CODE_NO_AUTO_UPDATE=1`, so the pinned copy never drifts).
+
+```sh
+PIN=~/.local/share/kimi-plugin-cc/kimi-bin/2.2.0
+mkdir -p "$PIN" && cd "$PIN" && printf '{"name":"kimi-plugin-cc-pin","private":true}\n' > package.json
+bun add @moonshot-ai/kimi-code@2.2.0
+export KIMI_PLUGIN_CC_KIMI_BIN="$PIN/node_modules/.bin/kimi"   # e.g. in ~/.zshenv
+```
+
+Both binaries share `~/.kimi-code` (login, config, hook), so nothing else
+changes. The certified maximum can be read from the installed plugin
+(`NATIVE_V2_CERTIFIED_VERSIONS` in `dist/kimi-engine.js`), which lets an upgrade
+script bump the pin automatically after each certification.
+
 ## The setup probe
 
 `/kimi:setup` runs a two-layer probe before reporting success:
