@@ -68,6 +68,20 @@ KIMI_PLUGIN_CC_SMOKE_HOME="$SMOKE_SEED_DIR" bun run smoke:real
 
 The seed directory is empty and can be removed afterward. Choose provider type and endpoint through the supported `KIMI_MODEL_*` settings if your account requires them. A configured model or an existing credential file is not proof that authentication works.
 
+**Maintainer route (1Password Agent Keys, no Touch ID, no OAuth store):** keep the API key in the read-only
+service-account vault and resolve it only for the smoke process:
+
+```sh
+# ~/.secrets.agent.op maps KIMI_MODEL_API_KEY to the vault item (by UUID) and sets the
+# non-secret KIMI_MODEL_NAME / KIMI_MODEL_PROVIDER_TYPE / KIMI_MODEL_BASE_URL for the key's endpoint.
+KIMI_PLUGIN_CC_SMOKE_HOME=$(mktemp -d) op-agent run --env-file ~/.secrets.agent.op -- bun run smoke:real
+```
+
+This never touches the operator's subscription login, so the token-rotation hazard above cannot occur. It
+consumes API credit, not subscription quota, and the synthesized provider is not trait-driven, so a
+`--thinking` request would be a no-op there (irrelevant to the smoke lanes). Prefer this route for every
+release gate; the seeded-personal-home route is the fallback when no API key is available.
+
 To test an exact CLI without updating the installed binary:
 
 ```sh
