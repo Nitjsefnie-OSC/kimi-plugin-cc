@@ -15,7 +15,7 @@ import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { MAX_DURATION_MS, parseSwarmArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // /kimi:swarm — READ-ONLY parallel fan-out (kimi-code 0.12.0 AgentSwarm tool).
 //
@@ -208,7 +208,8 @@ async function runReadSwarm(parsed, objective, context) {
             command_type: "review",
             cwd: context.cwd,
             model: parsed.model ?? null,
-            thinking: parsed.thinking ?? null,
+            thinking: null,
+            thinking_effort: parsed.thinkingEffort ?? null,
             background: false,
             budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
             budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -308,7 +309,8 @@ async function runWriteSwarm(parsed, objective, context) {
                 command_type: "rescue",
                 cwd: context.cwd,
                 model: parsed.model ?? null,
-                thinking: parsed.thinking ?? null,
+                thinking: null,
+                thinking_effort: parsed.thinkingEffort ?? null,
                 background: false,
                 budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
                 budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -493,6 +495,7 @@ writeMode) {
             // by other labels). Only set in write mode.
             trustedWorkspaceRoot: writeMode?.workspaceRoot,
             model: job.model ?? undefined,
+            thinkingEffort: job.thinking_effort ?? undefined,
             logPath: job.stream_log_path,
             signal: handlers.signal,
         }, budgetMs, "swarm.prompt");
@@ -501,6 +504,7 @@ writeMode) {
             throw new RuntimeError("SWARM_CANCELLED", "Swarm cancelled by user request.", "swarm.runtime");
         }
         assertCliResultSuccess(result, "swarm.runtime");
+        warnHookEscapes(result, "swarm", context.stderr);
         if (result.sessionId !== undefined &&
             result.sessionId.length > 0 &&
             result.sessionId !== job.kimi_session_id) {

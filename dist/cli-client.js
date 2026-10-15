@@ -19,6 +19,7 @@
 import { spawn } from "node:child_process";
 import { appendFile, mkdir } from "node:fs/promises";
 import path from "node:path";
+import { createHookEscapeMonitor } from "./hook-escape.js";
 import { RuntimeError, formatError } from "./errors.js";
 import { assertNoUnsafeExperimentalSelector, assertExecutionPlanMatchesSpawn, } from "./kimi-engine.js";
 import { assertPrefixArgsSafe } from "./kimi-command.js";
@@ -126,6 +127,14 @@ export async function runCliPrompt(opts) {
     let announcedSessionId;
     let announcedGoalSummary;
     let announcedSystemVersion;
+    const hookMonitor = createHookEscapeMonitor({ commandLabel: opts.commandLabel,
+        operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd });
+    const hookEscapes = [];
+    const noteHookEscape = (escape) => {
+        hookEscapes.push(escape);
+        appendLogLine({ event: "hook_escape", ...escape, command_label: opts.commandLabel,
+            operation_kind: opts.executionPlan.operationKind });
+    };
     let engineMismatchDetected = false;
     let handleEngineMismatch;
     const plannedEngine = opts.executionPlan.intendedEngine;
@@ -283,6 +292,9 @@ export async function runCliPrompt(opts) {
                 }
                 if (requireMarkerBeforeOutput(`a ${outcome.record.role} record`))
                     return;
+                const escape = hookMonitor.observe(outcome.record);
+                if (escape)
+                    noteHookEscape(escape);
                 records.push(outcome.record);
                 appendLogLine({ event: "record", record: outcome.record });
                 invokeOnRecord(outcome.record);
@@ -314,6 +326,13 @@ export async function runCliPrompt(opts) {
         const settle = (kind, payload) => {
             if (settlementStarted)
                 return;
+            // Denied calls still without a result (a cancel/budget race, an abnormal
+            // exit, or a turn that ended without the denial the hook owes) are reported
+            // alongside the real outcome, never instead of it.
+            for (const escape of hookMonitor.settle())
+                noteHookEscape(escape);
+            if (kind === "resolve" && hookEscapes.length > 0)
+                payload = { ...payload, hookEscapes: [...hookEscapes] };
             settlementStarted = true;
             opts.signal?.removeEventListener("abort", onAbort);
             // Abort teardown can outlive the direct child's close event while a
@@ -472,6 +491,11 @@ export async function runCliPrompt(opts) {
                 }
             }
         };
+        const stopForPolicyFailure = (error) => {
+            engineMismatchDetected = true; // Stops all further consumer output.
+            cancellationTeardown ??= teardownChildTree().then(() => ({ ok: true }), (error) => ({ ok: false, error }));
+            settle("reject", error);
+        };
         let engineMismatchError;
         handleEngineMismatch = (mismatch) => {
             if (engineMismatchError !== undefined)
@@ -493,8 +517,7 @@ export async function runCliPrompt(opts) {
                 system_version: mismatch.systemVersion ?? null,
                 reason: mismatch.reason,
             });
-            cancellationTeardown = teardownChildTree().then(() => ({ ok: true }), (error) => ({ ok: false, error }));
-            settle("reject", engineMismatchError);
+            stopForPolicyFailure(engineMismatchError);
         };
         const onAbort = () => {
             if (aborted)
@@ -674,6 +697,7 @@ export class ResponseTimeoutError extends RuntimeError {
                 partial_output_chars: partialResult?.records.reduce((count, record) => count + (record.role === "assistant" && typeof record.content === "string" ? record.content.length : 0), 0) ?? 0,
                 aborted: partialResult?.aborted ?? true,
                 ...(partialResult ? { settled_post_abort: true } : {}),
+                ...(partialResult?.hookEscapes?.length ? { hook_escapes: partialResult.hookEscapes } : {}),
             },
         });
         this.name = "ResponseTimeoutError";
@@ -778,11 +802,11 @@ function buildArgs(opts) {
             args.push("--skills-dir", dir);
         }
     }
-    // NOTE: `opts.thinking === false` is intentionally NOT translated into a
-    // `--no-thinking` argv flag. kimi-code 0.1.1 rejects unknown options and
-    // has no per-spawn thinking control — the Round 2 multi-agent review
-    // caught this. The option stays in CliClientOptions for future wiring
-    // when upstream adds the flag (see field doc).
+    // NOTE: thinking effort is requested through the env binding, never CLI argv.
+    // Non-trait-driven providers or a base level already off ignore it silently;
+    // an alwaysThinking model receives off unnormalized. stream-json carries no
+    // thinking deltas (writeThinkingDelta() {} in the JSON writer), so the plugin
+    // cannot observe whether the request was honoured.
     // -p accepts the prompt as the option value. We pass it as a separate argv
     // entry so prompts with leading dashes or whitespace are not interpreted as
     // additional flags.
@@ -791,6 +815,8 @@ function buildArgs(opts) {
 }
 function buildEnv(opts) {
     const env = { ...opts.env };
+    if (opts.thinkingEffort !== undefined)
+        env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;
     // 2.2.0 audit: ambient trust starts project MCP stdio servers outside PreToolUse.
     delete env.KIMI_CODE_TRUST_WORKSPACE;
     // kimi-code 0.33.0 inverted its CLI engine default: an unflagged `kimi -p`

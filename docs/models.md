@@ -80,3 +80,13 @@ validator. Every task still uses the existing exact-version, hook, workspace,
 and no-plan checks. Source review is against kimi-code 2.0.0 (`1b89e4b0`),
 including `kosongConfig/configSection.ts`, `envOverlay.ts`, and
 `cli/v2/run-v2-print.ts`.
+
+## Requested thinking effort
+
+`--thinking <effort>` requests per-run effort through `KIMI_MODEL_THINKING_EFFORT`, never a CLI flag or saved-default change; omitted flags preserve the operator-owned ambient variable, and resume does not inherit a previous job's request. Providers that are not trait-driven silently ignore it, as does a base level already `off`; an `alwaysThinking` model receives `off` unnormalized. Stream-json carries no thinking deltas (`writeThinkingDelta() {}`), so the plugin cannot verify whether the request was honoured.
+
+Use `--thinking off`, `--thinking high`, or `--thinking=<effort>` before the prompt. Values are lowercased and must match `/^[a-z][a-z0-9-]{0,31}$/` (a plugin-owned syntax bound; a future upstream token outside it is rejected before upstream sees it); upstream per-model `supportEfforts`, not a plugin enum, determines supported values. `--no-thinking` is an error: use `--thinking off`. In CLI 2.2.0 only the three Moonshot `kimi*` provider definitions are trait-driven. BYO providers ignore the request silently; an always-thinking model may remain thinking.
+
+Jobs persist nullable `thinking_effort`; status and `result --json` expose `thinking_effort_requested`, not observed effort. Detached ask/rescue workers replay the request. A resume without `--thinking` exports no new override (any ambient operator value remains). No config.toml write occurs.
+
+The review gate requests `off` by default. `KIMI_PLUGIN_CC_REVIEW_GATE_THINKING=inherit` exports no override; another non-empty value is lowercased and must match the same regex. Unset or empty means `off`; an invalid value makes the gate skip visibly. The gate remains fail-open on its 8 s timeout: a BYO provider or always-thinking model can ignore the request, and even an honoured request does not guarantee completion within the budget.

@@ -17,7 +17,7 @@ import { parseRescueArgs } from "../parsing.js";
 import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 export { describeMissingResult } from "../background-spawn.js";
 // v1.0 cutover note (PR 3):
@@ -69,7 +69,8 @@ export async function runRescue(argv, context) {
             command_type: "rescue",
             cwd: context.cwd,
             model: parsed.model ?? null,
-            thinking: parsed.thinking ?? null,
+            thinking: null,
+            thinking_effort: parsed.thinkingEffort ?? null,
             background: parsed.background,
             budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "rescue" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
             budget_source: parsed.budgetMs !== undefined ? "explicit"
@@ -188,6 +189,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             commandLabel: "rescue",
             trustedWorkspaceRoot: job.cwd,
             model: job.model ?? undefined,
+            thinkingEffort: job.thinking_effort ?? undefined,
             resumeSessionId: job.kimi_session_id ?? undefined,
             logPath: job.stream_log_path,
             signal: handlers.signal,
@@ -199,6 +201,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, "rescue.runtime");
         }
         assertCliResultSuccess(result, "rescue.runtime");
+        warnHookEscapes(result, "rescue", context.stderr);
         if (result.sessionId !== undefined &&
             result.sessionId.length > 0) {
             // length>0 guard: empty-string capture would poison the row. (Kimi

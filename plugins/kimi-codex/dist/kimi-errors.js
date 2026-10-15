@@ -45,7 +45,7 @@ export function classifyManagedCommandFailure(error, commandType, jobId, options
     if (error instanceof RuntimeError) {
         details.cause_code = error.code;
         if (error.code === "RESPONSE_TIMEOUT") {
-            for (const key of ["budget_ms", "record_count", "partial_output_chars", "aborted", "settled_post_abort"]) {
+            for (const key of ["budget_ms", "record_count", "partial_output_chars", "aborted", "settled_post_abort", "hook_escapes"]) {
                 if (error.details[key] !== undefined)
                     details[key] = error.details[key];
             }

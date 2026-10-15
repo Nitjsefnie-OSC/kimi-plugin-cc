@@ -28,7 +28,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // v1.0 cutover note (PR 2):
@@ -105,7 +105,8 @@ export async function runReview(
     command_type: commandType,
     cwd: context.cwd,
     model: parsed.model ?? null,
-    thinking: parsed.thinking ?? null,
+    thinking: null,
+    thinking_effort: parsed.thinkingEffort ?? null,
     background: false,
     budget_ms: parsed.budgetMs ?? null,
     budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -142,6 +143,7 @@ export async function runReview(
         prompt: previewPrompt,
         commandLabel: commandType,
         model: parsed.model,
+        thinkingEffort: parsed.thinkingEffort,
         logPath,
         signal: handlers.signal,
       },
@@ -160,6 +162,7 @@ export async function runReview(
     }
 
     assertCliResultSuccess(result, `${commandType}.runtime`);
+    warnHookEscapes(result, commandType, context.stderr);
     // Persist whichever session id kimi announced. Review never resumes,
     // but the id is the only handle for post-hoc replay against
     // ~/.kimi-code/sessions/.

@@ -108,7 +108,7 @@ needed to use the package. Kimi Code CLI and Node are still prerequisites.
 For an explicitly versioned local Claude Code plugin:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.2.0
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.2.1
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 

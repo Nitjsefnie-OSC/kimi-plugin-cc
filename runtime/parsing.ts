@@ -24,47 +24,29 @@ function looksLikeFlag(token: string): boolean {
 }
 
 export const ASK_SUPPORTED_FLAGS =
-  "-m/--model <name>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
 export const RESCUE_SUPPORTED_FLAGS =
-  "-m/--model <name>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
+  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --background, --wait, --fresh, -r, --resume <job-id|session-id>";
 
-export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --budget <30m|1h|90s>";
+export const REVIEW_SUPPORTED_FLAGS = "--base <ref>, -m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>";
 export const JOB_LOOKUP_SUPPORTED_FLAGS = "--type <review|challenge|rescue|review_gate|ask>, --json";
 
 export const SETUP_SUPPORTED_FLAGS = "--check, --uninstall, --all (with --uninstall), --enable-review-gate, --disable-review-gate, --models [--json] (without other setup flags)";
 export const REPAIR_SESSIONS_SUPPORTED_FLAGS = "--apply, --all";
 export const REPLAY_SUPPORTED_FLAGS = "none (one job-id required)";
 
-// Thinking-on is always-on for user-facing commands in v1.0. review-gate
-// pins thinking=false via the cli-client options bag instead of an argv
-// flag (see runtime/cli-client.ts::CliClientOptions). The parser rejects
-// --thinking and --no-thinking with a hard error so a documented-removed
-// flag doesn't get silently accepted as a no-op. Both bare (`--thinking`)
-// and assignment (`--thinking=true`) forms are rejected — otherwise the
-// assignment form would fall through to the generic "Unknown flag" path
-// and a wrapper agent reading the error would think the cure is to drop
-// the `=value` rather than the flag itself.
-const THINKING_FLAG_REMOVED_MESSAGE =
-  "--thinking / --no-thinking were removed in v1.0. Thinking is always on for user-facing commands.";
-
-function isRemovedThinkingFlag(token: string): boolean {
-  return (
-    token === "--thinking" ||
-    token === "--no-thinking" ||
-    token.startsWith("--thinking=") ||
-    token.startsWith("--no-thinking=")
-  );
+/** Validate syntax only; upstream per-model supportEfforts remains authoritative. */
+export function validateThinkingEffort(value: string | undefined, stage = "args.parse", lowercase = true): string {
+  const effort = lowercase ? value?.toLowerCase() : value;
+  if (!effort || !/^[a-z][a-z0-9-]{0,31}$/.test(effort)) {
+    throw new RuntimeError("INVALID_ARGS", "--thinking requires an effort matching [a-z][a-z0-9-]{0,31} (e.g. off, low, medium, high).", stage);
+  }
+  return effort;
 }
 
 export interface KimiFlagState {
   model?: string;
-  /**
-   * Pre-v1.0 commands set this from argv; alpha.4 always returns true
-   * for user-facing parsers (the row's metadata stays meaningful for
-   * historical jobs). review-gate's runtime caller sets this to false
-   * directly when populating the SQLite row.
-   */
-  thinking?: boolean;
+  thinkingEffort?: string;
 }
 
 export interface AskArgs extends KimiFlagState {
@@ -113,7 +95,7 @@ export interface PursueArgs extends KimiFlagState {
   objective?: string;
 }
 
-export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --budget <30m|1h|90s>, --turns <N>";
+export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --turns <N>";
 
 export interface SwarmArgs extends KimiFlagState {
   /**
@@ -157,7 +139,7 @@ export interface SwarmArgs extends KimiFlagState {
 }
 
 export const SWARM_SUPPORTED_FLAGS =
-  "-m/--model <name>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
+  "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 
 /**
  * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
@@ -165,7 +147,7 @@ export const SWARM_SUPPORTED_FLAGS =
  */
 export function parseSwarmArgs(argv: string[]): SwarmArgs {
   let model: string | undefined;
-  const thinking: boolean | undefined = true;
+  let thinkingEffort: string | undefined;
   let budgetMs: number | undefined;
   let cap: number | undefined;
   let maxConcurrency: number | undefined;
@@ -174,6 +156,13 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+    }
 
     if (token === "--") {
       trailingTokens = argv.slice(index + 1);
@@ -230,9 +219,6 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
         break;
       }
       default:
-        if (isRemovedThinkingFlag(token)) {
-          throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "swarm.parse");
-        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -252,7 +238,7 @@ export function parseSwarmArgs(argv: string[]): SwarmArgs {
     maxConcurrency,
     write,
     model,
-    thinking,
+    thinkingEffort,
     objective: trailingTokens?.join(" "),
   };
 }
@@ -333,13 +319,20 @@ export function parseDurationMs(
  */
 export function parsePursueArgs(argv: string[]): PursueArgs {
   let model: string | undefined;
-  const thinking: boolean | undefined = true;
+  let thinkingEffort: string | undefined;
   let budgetMs: number | undefined;
   let turns: number | undefined;
   let trailingTokens: string[] | undefined;
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+    }
 
     if (token === "--") {
       trailingTokens = argv.slice(index + 1);
@@ -396,9 +389,6 @@ export function parsePursueArgs(argv: string[]): PursueArgs {
         break;
       }
       default:
-        if (isRemovedThinkingFlag(token)) {
-          throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "pursue.parse");
-        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -416,7 +406,7 @@ export function parsePursueArgs(argv: string[]): PursueArgs {
     budgetMs,
     turns,
     model,
-    thinking,
+    thinkingEffort,
     objective: trailingTokens?.join(" "),
   };
 }
@@ -431,7 +421,7 @@ export interface JobLookupArgs {
 }
 
 /** Help before -- wins even over malformed flags or prose trailing-token mode. */
-const VALUE_TAKING_FLAGS = new Set(["-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
+const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
 
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
@@ -460,10 +450,7 @@ export function parseAskArgs(argv: string[]): AskArgs {
   if (hasHelpFlag(argv)) return { help: true, background: false, wait: false, fresh: false, resume: false };
   let budgetMs: number | undefined;
   let model: string | undefined;
-  // Thinking is on by default across ask/review/challenge/rescue. The
-  // parser rejects --thinking / --no-thinking; review-gate's runtime
-  // caller pins thinking=false via CliClientOptions instead.
-  let thinking: boolean | undefined = true;
+  let thinkingEffort: string | undefined;
   let background = false;
   let wait = false;
   let fresh = false;
@@ -474,6 +461,13 @@ export function parseAskArgs(argv: string[]): AskArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+    }
 
     if (token === "--") {
       trailingTokens = argv.slice(index + 1);
@@ -540,13 +534,6 @@ export function parseAskArgs(argv: string[]): AskArgs {
         break;
       }
       default:
-        if (isRemovedThinkingFlag(token)) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            THINKING_FLAG_REMOVED_MESSAGE,
-            "args.parse",
-          );
-        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -584,7 +571,7 @@ export function parseAskArgs(argv: string[]): AskArgs {
     resume,
     resumeTarget,
     model,
-    thinking,
+    thinkingEffort,
     prompt: trailingTokens?.join(" "),
   };
 }
@@ -602,7 +589,7 @@ export function parseReviewArgs(argv: string[], commandName: string = "review"):
     background: parsed.background,
     wait: parsed.wait,
     model: parsed.model,
-    thinking: parsed.thinking,
+    thinkingEffort: parsed.thinkingEffort,
     focus: parsed.trailingText,
   };
 }
@@ -611,7 +598,7 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
   if (hasHelpFlag(argv)) return { help: true, background: false, wait: false, fresh: false, resume: false };
   let budgetMs: number | undefined;
   let model: string | undefined;
-  let thinking: boolean | undefined = true;
+  let thinkingEffort: string | undefined;
   let background = false;
   let wait = false;
   let fresh = false;
@@ -622,6 +609,13 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+    }
 
     if (token === "--") {
       trailingTokens = argv.slice(index + 1);
@@ -688,13 +682,6 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
         break;
       }
       default:
-        if (isRemovedThinkingFlag(token)) {
-          throw new RuntimeError(
-            "INVALID_ARGS",
-            THINKING_FLAG_REMOVED_MESSAGE,
-            "args.parse",
-          );
-        }
         if (looksLikeFlag(token)) {
           throw new RuntimeError(
             "INVALID_ARGS",
@@ -732,7 +719,7 @@ export function parseRescueArgs(argv: string[]): RescueArgs {
     resume,
     resumeTarget,
     model,
-    thinking,
+    thinkingEffort,
     prompt: trailingTokens?.join(" "),
   };
 }
@@ -815,7 +802,7 @@ function parseKnownFlags(
 ): ParsedKnownFlags {
   let budgetMs: number | undefined;
   let model: string | undefined;
-  let thinking: boolean | undefined = true;
+  let thinkingEffort: string | undefined;
   let base: string | undefined;
   let background = false;
   let wait = false;
@@ -823,6 +810,13 @@ function parseKnownFlags(
 
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
+    if (token === "--thinking" || token.startsWith("--thinking=")) {
+      thinkingEffort = validateThinkingEffort(token === "--thinking" ? argv[++index] : token.slice("--thinking=".length));
+      continue;
+    }
+    if (token === "--no-thinking" || token.startsWith("--no-thinking=")) {
+      throw new RuntimeError("INVALID_ARGS", "--no-thinking is unsupported; use --thinking off", "args.parse");
+    }
 
     if (token === "--") {
       trailingTokens = argv.slice(index + 1);
@@ -830,9 +824,6 @@ function parseKnownFlags(
     }
 
     if (!knownFlags.has(token)) {
-      if (isRemovedThinkingFlag(token)) {
-        throw new RuntimeError("INVALID_ARGS", THINKING_FLAG_REMOVED_MESSAGE, "args.parse");
-      }
       if (looksLikeFlag(token)) {
         // Wrapper agents routinely hallucinate flags like `--file` /
         // `--context` because that shape is common in other CLIs. Silently
@@ -901,9 +892,6 @@ function parseKnownFlags(
       // The early `if (!knownFlags.has(token))` gate above means we only
       // reach this switch with tokens that ARE in knownFlags, and every
       // member is handled above. A `default` arm would be unreachable.
-      // --thinking and --no-thinking are NOT in knownFlags any more (v1.0
-      // removed them); the early gate above hard-fails on them with
-      // THINKING_FLAG_REMOVED_MESSAGE.
     }
   }
 
@@ -913,7 +901,7 @@ function parseKnownFlags(
     background,
     wait,
     model,
-    thinking,
+    thinkingEffort,
     trailingText: trailingTokens?.join(" "),
   };
 }

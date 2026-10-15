@@ -41,11 +41,11 @@ Legacy-v1 binaries use the applicable legacy lanes. For a new native-v2 candidat
 
 ## Authentication and credential handling
 
-The local harness copies selected seed-home files into temporary Kimi homes. These include `config.toml`, `credentials/`, `oauth/`, `device_id`, `mcp.json`, and `tui.toml` when present. It does not copy the session store.
+The local harness copies selected seed-home files into temporary Kimi homes: `config.toml`, `device_id`, `mcp.json`, and `tui.toml` when present. The OAuth token stores `credentials/` and `oauth/` are **symlinked, never copied** (since 2.2.1): a copied store that refreshes rotates the refresh token and leaves the real store with a revoked grant once the copy is removed. It does not touch the session store.
 
 The default seed home is `~/.kimi-code`. Setting API environment variables does not disable seed-file copying. To avoid copying personal credentials, set `KIMI_PLUGIN_CC_SMOKE_HOME` to a dedicated empty test home and supply authorized `KIMI_MODEL_*` credentials through the environment.
 
-Do not run a smoke against a personal seed home unless temporary credential copies are explicitly authorized for that run. Run live controls and smokes sequentially. Concurrent copies refreshing the same OAuth grant have invalidated the operator's login in past runs. Temporary homes are cleaned up by the harness; inspect cleanup after an interrupted run.
+Do not run a smoke against a personal seed home unless that use of the operator's login is explicitly authorized for that run. Run live controls and smokes sequentially. Copied token stores invalidated the operator's login twice (2026-09-15, 2026-10-15; `The provided authorization grant is invalid`, fixed only by `kimi login`) — never reintroduce copying, and never write an ad-hoc control that copies `~/.kimi-code/credentials`. Temporary homes are cleaned up by the harness (removing a symlink never touches the real store); inspect cleanup after an interrupted run.
 
 Routine diagnosis uses the active installation's `setup --check` or `setup --models`. Do not print raw config or OAuth files. Do not paste credentials into commands, logs, issues, or assistant conversations.
 

@@ -139,10 +139,24 @@ const KNOWN_LABELS = new Set<string>([
   "swarm-write",
 ]);
 
-export async function decideHookOutcome(
+export async function decideHookOutcome(input: HookInput, ctx: PolicyContext): Promise<HookDecision> {
+  const result = decideHookOutcomePure(input, ctx);
+  if (!("evaluator" in result)) return result;
+  const toolName = typeof input.tool_name === "string" ? input.tool_name : "";
+  if (ctx.rescueEvaluator !== undefined) {
+    return await ctx.rescueEvaluator(result.workspaceRoot, toolName, input.tool_input);
+  }
+  if (READ_ONLY_TOOLS.has(toolName)) return { decision: "allow" };
+  return {
+    decision: "deny",
+    reason: `kimi-plugin-cc safety hook: ${ctx.commandLabel} evaluator not configured; tool "${toolName}" denied as a safety default.`,
+  };
+}
+
+export function decideHookOutcomePure(
   input: HookInput,
   ctx: PolicyContext,
-): Promise<HookDecision> {
+): HookDecision | { evaluator: "rescue"; workspaceRoot: string } {
   const label = typeof ctx.commandLabel === "string" ? ctx.commandLabel : undefined;
   // Out-of-plugin context: any kimi process spawned without our env var
   // is direct user usage. The hook MUST NOT restrict it.
@@ -249,18 +263,7 @@ export async function decideHookOutcome(
             "This is a plugin misconfiguration — writes are refused rather than risk the user's working tree.",
         };
       }
-      if (ctx.rescueEvaluator !== undefined) {
-        return await ctx.rescueEvaluator(workspaceRoot, toolName, input.tool_input);
-      }
-      // Stub for callers that didn't inject the evaluator (tests of the policy
-      // function alone). The production entry script always injects it.
-      if (READ_ONLY_TOOLS.has(toolName)) {
-        return { decision: "allow" };
-      }
-      return {
-        decision: "deny",
-        reason: `kimi-plugin-cc safety hook: swarm-write evaluator not configured; tool "${toolName}" denied as a safety default.`,
-      };
+      return { evaluator: "rescue", workspaceRoot };
     }
 
     case "rescue": {
@@ -275,22 +278,7 @@ export async function decideHookOutcome(
             "This is a plugin misconfiguration — writes are refused rather than trusting hook payload cwd.",
         };
       }
-      if (ctx.rescueEvaluator !== undefined) {
-        return await ctx.rescueEvaluator(workspaceRoot, toolName, input.tool_input);
-      }
-      // Stub for callers that didn't inject the evaluator (e.g.,
-      // tests that exercise only the policy function). Allow
-      // Read/Grep/Glob and friends; deny everything else. The
-      // production entry script wires the real evaluator from
-      // runtime/rescue-approval.ts.
-      if (READ_ONLY_TOOLS.has(toolName)) {
-        return { decision: "allow" };
-      }
-      return {
-        decision: "deny",
-        reason:
-          `kimi-plugin-cc safety hook: rescue evaluator not configured; tool "${toolName}" denied as a safety default.`,
-      };
+      return { evaluator: "rescue", workspaceRoot };
     }
 
     default:

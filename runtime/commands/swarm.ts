@@ -36,7 +36,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // /kimi:swarm — READ-ONLY parallel fan-out (kimi-code 0.12.0 AgentSwarm tool).
@@ -253,7 +253,8 @@ async function runReadSwarm(
       command_type: "review",
       cwd: context.cwd,
       model: parsed.model ?? null,
-      thinking: parsed.thinking ?? null,
+      thinking: null,
+      thinking_effort: parsed.thinkingEffort ?? null,
       background: false,
       budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
       budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -382,7 +383,8 @@ async function runWriteSwarm(
         command_type: "rescue",
         cwd: context.cwd,
         model: parsed.model ?? null,
-        thinking: parsed.thinking ?? null,
+        thinking: null,
+        thinking_effort: parsed.thinkingEffort ?? null,
         background: false,
         budget_ms: parsed.budgetMs ?? KIMI_SWARM_DEFAULT_BUDGET_MS,
         budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -611,6 +613,7 @@ async function executeSwarmJob(
         // by other labels). Only set in write mode.
         trustedWorkspaceRoot: writeMode?.workspaceRoot,
         model: job.model ?? undefined,
+        thinkingEffort: job.thinking_effort ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,
       },
@@ -625,6 +628,7 @@ async function executeSwarmJob(
     }
 
     assertCliResultSuccess(result, "swarm.runtime");
+    warnHookEscapes(result, "swarm", context.stderr);
 
     if (
       result.sessionId !== undefined &&

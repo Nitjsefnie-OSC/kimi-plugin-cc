@@ -5,37 +5,15 @@ import { parseAskArgs, parsePursueArgs, parseSwarmArgs, parseJobLookupArgs, pars
 
 describe("argument parsing", () => {
   test("parseAskArgs preserves text after the -- sentinel", () => {
-    // v1.0 alpha.4: thinking is always-on; --thinking/--no-thinking are
-    // rejected with a hard error. Use --fresh as the leading flag here.
     const parsed = parseAskArgs(["--fresh", "--", "--literal", "question"]);
 
-    expect(parsed.thinking).toBeTrue();
+    expect(parsed.thinkingEffort).toBeUndefined();
     expect(parsed.fresh).toBeTrue();
     expect(parsed.prompt).toBe("--literal question");
     expect(parsed.resume).toBeFalse();
   });
 
-  test("parseAskArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
-    expect(() => parseAskArgs(["--no-thinking", "hello"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseAskArgs(["--thinking", "hello"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
-  test("parseAskArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
-    // Codex Round 4 (pre-GA): assignment form fell through to the generic
-    // "Unknown flag" path. A wrapper agent reading that error would think
-    // the fix is to drop the `=value`, not the flag itself. Force the
-    // canonical message for the assignment form too.
-    expect(() => parseAskArgs(["--no-thinking=true", "hello"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseAskArgs(["--thinking=false", "hello"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
   test("parseAskArgs rejects unknown flag-shaped tokens in flag-position", () => {
     expect(() => parseAskArgs(["-m", "kimi-k2", "--mystery", "tail"])).toThrow(
@@ -53,7 +31,7 @@ describe("argument parsing", () => {
       resumeTarget: "foo",
       fresh: false,
       model: undefined,
-      thinking: true,
+      thinkingEffort: undefined,
       prompt: undefined,
     });
   });
@@ -68,7 +46,7 @@ describe("argument parsing", () => {
       resumeTarget: undefined,
       fresh: false,
       model: undefined,
-      thinking: true,
+      thinkingEffort: undefined,
       prompt: "my question",
     });
   });
@@ -126,66 +104,14 @@ describe("argument parsing", () => {
     const parsed = parseReviewArgs(["--base", "main", "focus", "on", "rollback"]);
 
     expect(parsed.base).toBe("main");
-    expect(parsed.thinking).toBeTrue();
+    expect(parsed.thinkingEffort).toBeUndefined();
     expect(parsed.focus).toBe("focus on rollback");
   });
 
-  test("parseReviewArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
-    expect(() => parseReviewArgs(["--no-thinking", "focus"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseReviewArgs(["--thinking", "focus"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
-  test("parseReviewArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
-    expect(() => parseReviewArgs(["--no-thinking=true", "focus"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseReviewArgs(["--thinking=false", "focus"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
-  test("parseReviewArgs hard-rejects thinking flag forms when invoked as 'challenge'", () => {
-    // parseReviewArgs handles both /kimi:review and /kimi:challenge via
-    // its `commandName` parameter; both share `parseKnownFlags`. A future
-    // refactor of that helper could regress the challenge path silently
-    // (kimi review-smoke #2 on the alpha.5 candidate caught this gap).
-    // Pin all four forms — bare and =value, for thinking and no-thinking
-    // — explicitly under the challenge command label.
-    expect(() => parseReviewArgs(["--no-thinking", "focus"], "challenge")).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseReviewArgs(["--thinking", "focus"], "challenge")).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseReviewArgs(["--no-thinking=true", "focus"], "challenge")).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseReviewArgs(["--thinking=false", "focus"], "challenge")).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
-  test("parseRescueArgs hard-rejects --no-thinking with the v1.0 removal message", () => {
-    expect(() => parseRescueArgs(["--no-thinking", "fix the bug"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseRescueArgs(["--thinking", "fix the bug"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
-  test("parseRescueArgs hard-rejects --thinking=value / --no-thinking=value with the v1.0 removal message", () => {
-    expect(() => parseRescueArgs(["--no-thinking=true", "fix"])).toThrow(
-      /thinking is always on/i,
-    );
-    expect(() => parseRescueArgs(["--thinking=false", "fix"])).toThrow(
-      /thinking is always on/i,
-    );
-  });
 
   test("parseReviewArgs rejects --model followed by another flag", () => {
     expect(() => parseReviewArgs(["--model", "--background", "focus"])).toThrow(RuntimeError);
@@ -364,5 +290,24 @@ for (const parse of [parseAskArgs, parseRescueArgs]) {
     expect(parse(["what", "does", "du", "-h", "print"]).help).toBeUndefined();
     expect(parse(["what", "does", "du", "-h", "print"]).prompt).toBe("what does du -h print");
     expect(parse(["prose", "--help"]).help).toBeUndefined();
+  });
+}
+
+for (const parse of [parseAskArgs, parseRescueArgs, parseReviewArgs, (a: string[]) => parseReviewArgs(a, "challenge"), parsePursueArgs, parseSwarmArgs]) {
+  test("thinking syntax matrix: " + parse.name, () => {
+    for (const effort of ["off", "LOW", "medium", "high", "future-effort2", "a".repeat(32)]) {
+      for (const args of [["--thinking", effort], ["--thinking=" + effort]]) {
+        expect(parse(args).thinkingEffort).toBe(effort.toLowerCase());
+      }
+    }
+    for (const args of [["--thinking"], ["--thinking", "--budget"], ["--thinking="], ["--thinking", "a".repeat(33)], ["--thinking", "1high"], ["--thinking", "a_b"], ["--thinking", "high low"]]) {
+      expect(() => parse(args)).toThrow(RuntimeError);
+    }
+    for (const flag of ["--no-thinking", "--no-thinking=false"]) {
+      expect(() => parse([flag])).toThrow("use --thinking off");
+    }
+    expect(parse([]).thinkingEffort).toBeUndefined();
+    expect(parse(["--", "--thinking", "off"]).thinkingEffort).toBeUndefined();
+    expect(parse(["prose", "--thinking", "off"]).thinkingEffort).toBeUndefined();
   });
 }

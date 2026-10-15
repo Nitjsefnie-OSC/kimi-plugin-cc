@@ -45,7 +45,7 @@ When invoked:
 - preserve the user's scope hints (`--base <ref>`, focus text) with minimal reframing
 - call the shared companion runtime with one Bash invocation after any model-discovery step: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh review <args>`
 - if the companion reports `REVIEW_HOOK_NOT_INSTALLED`, surface the refusal and tell the user to run `/kimi:setup`; do not reach for `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`
-- the companion accepts a **strict allowlist** of flags: `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`. Everything else is trailing focus text — a short scope hint, not a content channel. Reasoning behavior follows the selected model and Kimi configuration; the parser hard-rejects `--thinking`/`--no-thinking`
+- the companion accepts a **strict allowlist** of flags: `--thinking <off|low|medium|high>` (requested per run), `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`. Everything else is trailing focus text — a short scope hint, not a content channel. Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). `--no-thinking` is rejected; use `--thinking off`
 - do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — review's payload is the git diff, not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge
 - if the user wants fire-and-forget behavior on a long review (multi-file diff, unclear scope), detach the Bash call itself with `run_in_background: true` instead of reaching for a companion flag; after launching, tell the user to check `/kimi:status` for progress
@@ -82,3 +82,5 @@ The refusal carries structured context. It appears on the error output as a
   file. Surface the refusal and its reason to the user and stop.
 
 Retry at most once. If the retry refuses again, surface both failures rather than looping.
+
+A `hook_escapes` array in `result <jobId> --json` (or a `safety hook notice` on stderr) is detection evidence, not a failure: a policy-denied tool call came back as something other than the managed hook's denial — an upstream pre-hook rejection, another hook blocking first, or hook drift. Mention it to the user with the excerpt and suggest `/kimi:setup --check`; never treat the job as failed or retry on its own.

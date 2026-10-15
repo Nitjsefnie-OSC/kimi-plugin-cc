@@ -73,7 +73,7 @@ export class JobStore {
             if (!tableHasColumn(this.db, "budget_ms")) {
                 this.db.exec(`ALTER TABLE jobs ADD COLUMN budget_ms INTEGER;`);
             }
-            for (const column of ["kimi_session_id_source", "budget_source"]) {
+            for (const column of ["kimi_session_id_source", "budget_source", "thinking_effort", "hook_escapes"]) {
                 if (!tableHasColumn(this.db, column)) {
                     this.db.exec("ALTER TABLE jobs ADD COLUMN " + column + " TEXT;");
                 }
@@ -172,14 +172,14 @@ export class JobStore {
         try {
             this.db.run(`
           INSERT INTO jobs (
-            job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
+            job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking, thinking_effort,
             background, pid, kimi_pid, status, kimi_session_id, kimi_session_id_source, budget_source,
             operation_kind, intended_engine, observed_engine, kimi_version, system_version,
             kimi_command, kimi_prefix_args, plan_certification, resumed_from_job_id, safety_profile,
             agent_profile, prompt_digest, summary, phase, budget_ms, final_output_path, stream_log_path, error
           )
           VALUES (
-            @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
+            @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking, @thinking_effort,
             @background, @pid, @kimi_pid, @status, @kimi_session_id, @kimi_session_id_source, @budget_source,
             @operation_kind, @intended_engine, @observed_engine, @kimi_version, @system_version,
             @kimi_command, @kimi_prefix_args, @plan_certification, @resumed_from_job_id, @safety_profile,
@@ -309,7 +309,7 @@ export class JobStore {
         "status", "summary", "phase", "budget_ms", "budget_source", "kimi_session_id_source", "pid", "kimi_pid",
         "final_output_path", "stream_log_path", "kimi_session_id",
         "error", "command_type", "prompt_digest", "repo_id",
-        "cwd", "model", "thinking", "background", "agent_profile",
+        "cwd", "model", "thinking", "thinking_effort", "hook_escapes", "background", "agent_profile",
         "operation_kind", "intended_engine", "observed_engine", "kimi_version",
         "system_version", "kimi_command", "kimi_prefix_args", "plan_certification",
         "resumed_from_job_id", "safety_profile",
@@ -349,6 +349,7 @@ function hydrateRow(row) {
 function serializeRecord(record) {
     return {
         ...record,
+        thinking_effort: record.thinking_effort ?? null,
         phase: record.phase ?? null,
         budget_ms: record.budget_ms ?? null,
         budget_source: record.budget_source ?? null,
@@ -591,6 +592,18 @@ export function withJobStoreSync(paths, fn) {
     }
 }
 /** Old non-null budgets have unknown provenance; never invent explicit intent. */
+/** Parsed `hook_escapes` column for JSON envelopes: [] when NULL or unreadable. */
+export function parseHookEscapes(raw) {
+    if (!raw)
+        return [];
+    try {
+        const parsed = JSON.parse(raw);
+        return Array.isArray(parsed) ? parsed : [];
+    }
+    catch {
+        return [];
+    }
+}
 export function renderBudgetSource(job) {
     return job.budget_source ?? (job.budget_ms === null ? "default" : "unknown");
 }

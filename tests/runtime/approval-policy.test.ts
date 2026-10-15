@@ -335,3 +335,23 @@ describe("pursue goal metadata", () => {
     }
   });
 });
+
+test("pure policy plus evaluator matches async policy across the fixture matrix", async () => {
+  const { decideHookOutcomePure, READ_ONLY_TOOLS } = await import("../../runtime/hooks/approval-policy.js");
+  for (const commandLabel of [undefined, "", "unknown", "ask", "review", "challenge", "review_gate", "swarm", "rescue", "swarm-write"]) {
+    for (const operationKind of [undefined, "rescue", "pursue"]) {
+      for (const trustedWorkspaceRoot of [undefined, "", "/workspace"]) {
+        for (const tool_name of [undefined, ...READ_ONLY_TOOLS, "Write", "Edit", "Bash", "Agent", "AgentSwarm", "EnterPlanMode", "ExitPlanMode", "GetGoal", "UpdateGoal", "CreateGoal", "SetGoalBudget"]) {
+          for (const tool_input of [{}, { status: "complete" }, { status: "blocked" }, { status: "active" }, null, []]) {
+            const input = { tool_name, tool_input };
+            const rescueEvaluator = async () => ({ decision: "deny" as const, reason: "fixture evaluator denial" });
+            const ctx = { commandLabel, operationKind, trustedWorkspaceRoot, rescueEvaluator };
+            const pure = decideHookOutcomePure(input, ctx);
+            const expected = "evaluator" in pure ? await rescueEvaluator() : pure;
+            expect(await decideHookOutcome(input, ctx)).toEqual(expected);
+          }
+        }
+      }
+    }
+  }
+});

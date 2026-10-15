@@ -43,3 +43,9 @@ test("direct ask/rescue commands return parser help before hook or state access"
   expect(await runAsk(["--budget", "--help"], context)).toContain("Usage: companion.sh ask");
   expect(await runRescue(["--background", "-h"], context)).toContain("Usage: companion.sh task rescue");
 });
+
+test("thinking value is skipped by help scanning and appears in all model command usage", () => {
+  for (const cmd of [["ask"], ["review"], ["task", "challenge"], ["task", "rescue"], ["task", "pursue"], ["task", "swarm"]]) {
+    expect(companionHelp([...cmd, "--thinking", "off", "--help"])).toContain("--thinking <off|low|medium|high>");
+  }
+});

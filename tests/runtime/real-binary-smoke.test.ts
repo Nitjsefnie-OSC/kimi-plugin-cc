@@ -39,9 +39,9 @@
 // Why it is opt-in (skipped by default):
 //
 //   It needs a real kimi binary AND working credentials. It runs in an
-//   isolated KIMI_CODE_HOME seeded from a real kimi-code home (config +
-//   OAuth/credentials), so it never mutates the operator's real config or
-//   session store. `bun run check` has neither binary nor creds in CI or a
+//   isolated KIMI_CODE_HOME seeded from a real kimi-code home (config copied;
+//   the OAuth token stores symlinked so refreshes land in the one real store),
+//   so it never mutates the operator's real config or session store. `bun run check` has neither binary nor creds in CI or a
 //   fresh clone, so the suite is skipped unless KIMI_PLUGIN_CC_SMOKE=1 and
 //   the prerequisites resolve. Run it with:
 //
@@ -54,7 +54,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { execFileSync } from "node:child_process";
-import { access, appendFile, cp, readdir, readFile, stat, writeFile } from "node:fs/promises";
+import { access, appendFile, cp, readdir, readFile, stat, symlink, writeFile } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
 import os from "node:os";
 import path from "node:path";
@@ -211,14 +211,20 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return { cwd, env, stdout: process.stdout, stderr: process.stderr };
 }
 
-// Copy the curated auth + config surface from the seed home into an
-// isolated KIMI_CODE_HOME. Missing entries are skipped (not every install
-// has mcp.json / tui.toml).
+// Copy the curated config surface from the seed home into an isolated
+// KIMI_CODE_HOME. Missing entries are skipped (not every install has
+// mcp.json / tui.toml). The token stores (`credentials/`, `oauth/`) are
+// SYMLINKED, never copied: a copy that refreshes rotates the OAuth refresh
+// token, and once the copy is deleted the operator's real store holds a
+// revoked grant ("The provided authorization grant is invalid" — it happened
+// on 2026-10-15 and cost a re-login). One shared live store cannot diverge.
+const SHARED_TOKEN_STORES = new Set<string>(["credentials", "oauth"]);
 async function seedKimiHome(seedHome: string, destHome: string): Promise<void> {
   for (const entry of SEED_ENTRIES) {
     const src = path.join(seedHome, entry);
     if (!existsSync(src)) continue;
-    await cp(src, path.join(destHome, entry), { recursive: true });
+    if (SHARED_TOKEN_STORES.has(entry)) await symlink(src, path.join(destHome, entry));
+    else await cp(src, path.join(destHome, entry), { recursive: true });
   }
 }
 

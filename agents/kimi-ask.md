@@ -83,3 +83,7 @@ The refusal carries structured context. It appears on the error output as a
   file. Surface the refusal and its reason to the user and stop.
 
 Retry at most once. If the retry refuses again, surface both failures rather than looping.
+
+Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). `--no-thinking` is rejected; use `--thinking off`.
+
+A `hook_escapes` array in `result <jobId> --json` (or a `safety hook notice` on stderr) is detection evidence, not a failure: a policy-denied tool call came back as something other than the managed hook's denial — an upstream pre-hook rejection, another hook blocking first, or hook drift. Mention it to the user with the excerpt and suggest `/kimi:setup --check`; never treat the job as failed or retry on its own.

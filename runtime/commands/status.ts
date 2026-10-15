@@ -2,7 +2,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
 import { reconcileHistoricalJobProvenance } from "../kimi-engine.js";
-import { renderBudgetSource, withJobStore } from "../job-store.js";
+import { parseHookEscapes, renderBudgetSource, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import type { CommandContext } from "../types.js";
@@ -29,6 +29,6 @@ export async function runStatus(argv: string[], context: CommandContext): Promis
 
     const job = await reconcileHistoricalJobProvenance(store, found);
 
-    return `${JSON.stringify({ ...job, budget_source: renderBudgetSource(job) }, null, 2)}\n`;
+    return `${JSON.stringify({ ...job, thinking_effort_requested: job.thinking_effort ?? null, hook_escapes: parseHookEscapes(job.hook_escapes), budget_source: renderBudgetSource(job) }, null, 2)}\n`;
   });
 }

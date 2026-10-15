@@ -201,8 +201,8 @@ export const KIMI_TESTED_MINORS: ReadonlyArray<{ major: number; minor: number }>
   // import it; `-p` stdout stays the direct PromptJsonWriter), session-lifecycle
   // changes that only HELP our cancellation story (active-turn cancel on close +
   // BACKGROUND_KEEP_ALIVE_ON_EXIT default flipped true→false), an `alwaysThinking`
-  // model-capability flag (read-only detection, the H5 thinking-control knob is
-  // still upstream-blocked), a SIGHUP cleanup handler (exit 129; SIGTERM still
+  // model-capability flag (the H5 env request ships in plugin 2.2.1,
+  // but always-thinking models need not honour it), a SIGHUP cleanup handler (exit 129; SIGTERM still
   // exits 143 and runs cleanup — our SIGTERM→SIGKILL reaping is unaffected), and
   // a new builtin `import-from-cc-codex` skill (not a plugin surface).
   // See .claude/kimi-code-research/reports/72-76 for the audit reports.

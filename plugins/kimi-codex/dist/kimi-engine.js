@@ -206,6 +206,8 @@ export function observedExecutionFields(result) {
     return {
         observed_engine: result.observedEngine,
         system_version: result.systemVersion ?? null,
+        // Detection evidence from runtime/hook-escape.ts, JSON array or NULL.
+        hook_escapes: result.hookEscapes && result.hookEscapes.length > 0 ? JSON.stringify(result.hookEscapes) : null,
     };
 }
 export function executionPlanFromPersisted(fields) {

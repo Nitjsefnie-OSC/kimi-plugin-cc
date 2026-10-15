@@ -503,3 +503,57 @@ describe("review gate resolves a relative KIMI_CODE_HOME against the payload cwd
     }
   }, 60_000);
 });
+
+test.each([undefined, "inherit", "high"])("gate thinking request %j reaches the child and job", async (thinking) => {
+  const data = await createTestPluginDataRoot("gate-thinking");
+  const invocation = path.join(data, "invocation.json");
+  const env: NodeJS.ProcessEnv = { ...process.env, KIMI_PLUGIN_CC_DATA: data,
+    KIMI_CODE_HOME: path.join(data, "home"), KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
+    KIMI_PLUGIN_CC_KIMI_BIN: "bun", KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mockCliPath]),
+    KIMI_PLUGIN_CC_MOCK_SCENARIO: "review-gate-allow", KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocation };
+  delete env.KIMI_MODEL_THINKING_EFFORT;
+  if (thinking === undefined) delete env.KIMI_PLUGIN_CC_REVIEW_GATE_THINKING;
+  else env.KIMI_PLUGIN_CC_REVIEW_GATE_THINKING = thinking;
+  try {
+    const paths = resolvePluginPaths(env);
+    await mkdir(paths.pluginRoot, { recursive: true });
+    await writeFile(paths.configPath, JSON.stringify({ reviewGateEnabled: true }));
+    await invokeHook(env, { cwd: process.cwd(), hook_event_name: "Stop", last_assistant_message: "done" });
+    expect(JSON.parse(await readFile(invocation, "utf8")).env.KIMI_MODEL_THINKING_EFFORT).toBe(thinking === "inherit" ? null : thinking ?? "off");
+    const store = new JobStore(paths);
+    try {
+      const repo = await resolveRepoIdentity(process.cwd());
+      const job = store.findLatestJob({ repoId: repo.repoId, commandType: "review_gate" });
+      expect(job?.thinking_effort).toBe(thinking === "inherit" ? null : thinking ?? "off");
+      expect(job?.thinking).toBe(false);
+    } finally { store.close(); }
+  } finally { await cleanupTestPath(data); }
+});
+
+test.each(["executed", "unresolved"])("compiled Stop-hook wiring on hook escape %s: stays fail-open, annotates, persists the finding", async (kind) => {
+  const data = await createTestPluginDataRoot("gate-escape");
+  const env = { ...process.env, KIMI_PLUGIN_CC_DATA: data,
+    KIMI_CODE_HOME: path.join(data, "home"), KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
+    KIMI_PLUGIN_CC_KIMI_BIN: "bun", KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify([mockCliPath]),
+    KIMI_PLUGIN_CC_MOCK_SCENARIO: `hook-escape-${kind}` };
+  try {
+    const paths = resolvePluginPaths(env);
+    await mkdir(paths.pluginRoot, { recursive: true });
+    await writeFile(paths.configPath, JSON.stringify({ reviewGateEnabled: true }));
+    const result = spawnSync(path.resolve("scripts/review-gate-hook.sh"), [], { env, encoding: "utf8",
+      input: JSON.stringify({ cwd: process.cwd(), hook_event_name: "Stop", last_assistant_message: "done" }) });
+    expect(result.status).toBe(0);
+    const output = JSON.parse(result.stdout);
+    // Detection evidence only: the gate never blocks on it, but says so.
+    expect(output.decision).toBeUndefined();
+    expect(output.systemMessage).toContain("safety hook notice");
+    expect(output.systemMessage).toContain(kind === "executed" ? "Write mismatch" : "Write unresolved");
+    const store = new JobStore(paths);
+    try {
+      const repo = await resolveRepoIdentity(process.cwd());
+      const job = store.findLatestJob({ repoId: repo.repoId, commandType: "review_gate" });
+      expect(job?.status).toBe("completed");
+      expect(JSON.parse(job?.hook_escapes ?? "[]")[0]).toMatchObject({ kind: kind === "executed" ? "mismatch" : "unresolved", tool_name: "Write" });
+    } finally { store.close(); }
+  } finally { await cleanupTestPath(data); }
+});

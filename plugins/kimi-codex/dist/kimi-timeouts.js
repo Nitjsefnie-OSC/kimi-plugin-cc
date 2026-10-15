@@ -8,7 +8,7 @@
 // startup failures surface as CLI_SPAWN_FAILED / CLI_PROCESS_ERROR —
 // not as separate timeouts. So only the per-command response budgets
 // remain.
-// Budgets are sized for thinking-on workflow (the default since v1.0).
+// Budgets accommodate thinking-capable workflows; per-run effort is only a request.
 // kimi-code spends real wallclock on extended reasoning before emitting
 // the first assistant record; pre-alpha.4 budgets (300s/600s) were sized
 // against the non-thinking path and timed out in production smoke
@@ -49,15 +49,11 @@ export const KIMI_SWARM_DEFAULT_BUDGET_MS = 1_800_000; // 30 minutes
  * Review-gate budget. Fires inside Claude Code's Stop hook so any value
  * above the user's perceptible wait makes the gate feel broken.
  *
- * kimi-code 0.1.1 has no per-spawn CLI flag for thinking control
- * (Round 2 multi-agent review caught this — emitting `--no-thinking`
- * triggers an unknown-option crash). The 8s budget assumes the user
- * has either `default_thinking = false` or `[thinking].mode = "off"`
- * in `~/.kimi-code/config.toml`, OR a non-thinking-capable model
- * selected for review-gate (via KIMI_PLUGIN_CC_REVIEW_GATE_MODEL).
- * Under thinking-on the gate will time out — the gate is fail-open on
- * timeout by design, so the worst case is the gate becomes
- * always-allow. See docs/safety.md.
+ * The gate requests off through KIMI_MODEL_THINKING_EFFORT by default;
+ * KIMI_PLUGIN_CC_REVIEW_GATE_THINKING can inherit or request another effort.
+ * BYO/non-trait-driven providers and always-thinking models can ignore it.
+ * The 8s timeout remains fail-open; a request never guarantees completion.
+ * Hook-enforcement escape is a separate blocking failure. See docs/safety.md.
  */
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
 export function isTimeoutCode(code) {

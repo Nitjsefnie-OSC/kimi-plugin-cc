@@ -349,10 +349,13 @@ export function persistedExecutionPlanFields(
 export function observedExecutionFields(result: {
   observedEngine: KimiEngine | null;
   systemVersion?: string;
-}): { observed_engine: KimiEngine | null; system_version: string | null } {
+  hookEscapes?: ReadonlyArray<unknown>;
+}): { observed_engine: KimiEngine | null; system_version: string | null; hook_escapes: string | null } {
   return {
     observed_engine: result.observedEngine,
     system_version: result.systemVersion ?? null,
+    // Detection evidence from runtime/hook-escape.ts, JSON array or NULL.
+    hook_escapes: result.hookEscapes && result.hookEscapes.length > 0 ? JSON.stringify(result.hookEscapes) : null,
   };
 }
 

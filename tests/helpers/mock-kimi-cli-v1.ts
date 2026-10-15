@@ -21,6 +21,7 @@
 //   KIMI_PLUGIN_CC_MOCK_DELAY_MS      delay before emitting records (cancellation tests)
 //   KIMI_PLUGIN_CC_MOCK_SESSION_ID    override session id announced in stderr
 
+import { decideHookOutcome } from "../../runtime/hooks/approval-policy.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import path from "node:path";
@@ -70,6 +71,7 @@ async function main(): Promise<void> {
         argv: process.argv.slice(2),
         scenario,
         env: {
+          KIMI_MODEL_THINKING_EFFORT: process.env.KIMI_MODEL_THINKING_EFFORT ?? null,
           KIMI_PLUGIN_CC_CMD: process.env.KIMI_PLUGIN_CC_CMD ?? null,
           KIMI_PLUGIN_CC_WORKSPACE_ROOT:
             process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT ?? null,
@@ -105,6 +107,34 @@ async function main(): Promise<void> {
         JSON.stringify({ type: "context.append_message", agentId: "main", message: { role: "user", content: [{ type: "text", text }] }, time: Date.now() }),
       ].map((line) => `${line}\n`).join(""));
     }
+  }
+  if (scenario.startsWith("hook-escape-")) {
+    const toolInput = { path: "/tmp/mock-hook-escape", content: "unsafe" };
+    const toolName = process.env.KIMI_PLUGIN_CC_MOCK_HOOK_TOOL ?? "Write";
+    const call = { id: "escape-1", type: "function", function: { name: toolName, arguments: JSON.stringify(toolInput) } };
+    process.stdout.write(JSON.stringify({ role: "assistant", tool_calls: [call] }) + "\n");
+    if (process.env.KIMI_PLUGIN_CC_MOCK_HOOK_PENDING_MS) await sleep(Number(process.env.KIMI_PLUGIN_CC_MOCK_HOOK_PENDING_MS));
+    if (scenario !== "hook-escape-unresolved") {
+      const decision = await decideHookOutcome({ tool_name: toolName, tool_input: toolInput }, {
+        commandLabel: process.env.KIMI_PLUGIN_CC_CMD, operationKind: process.env.KIMI_PLUGIN_CC_OPERATION,
+        trustedWorkspaceRoot: process.env.KIMI_PLUGIN_CC_WORKSPACE_ROOT,
+      });
+      process.stdout.write(JSON.stringify({ role: "tool", tool_call_id: call.id,
+        content: scenario === "hook-escape-denied" ? decision.reason : "ok: wrote file" }) + "\n");
+    }
+    // The run always finishes with prose (or, under the review gate, its JSON verdict):
+    // the monitor is detection evidence, so the job must complete normally.
+    const gate = process.env.KIMI_PLUGIN_CC_CMD === "review_gate";
+    if (scenario === "hook-escape-executed") {
+      // The run continues after a mismatch (detection only); this sentinel proves it.
+      await sleep(300);
+      if (!gate) process.stdout.write(JSON.stringify({ role: "assistant", content: "UNTRUSTED AFTER ESCAPE" }) + "\n");
+    }
+    const prose = scenario === "hook-escape-denied" ? "The hook denied the attempted write."
+      : scenario === "hook-escape-executed" ? "Finished after the mismatching tool result." : "Finished with no result for the denied call.";
+    process.stdout.write(JSON.stringify({ role: "assistant", content: gate
+      ? JSON.stringify({ decision: "ALLOW", confidence: "high", summary: prose, issues: [] }) : prose }) + "\n");
+    return;
   }
   const records = recordsForScenario(scenario);
   for (const record of records) {

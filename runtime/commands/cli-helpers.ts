@@ -207,6 +207,19 @@ export async function captureTimeoutPartialOutput(
   };
 }
 
+/** One-line human summary of hook-escape findings, or undefined when none. */
+export function describeHookEscapes(result: Pick<CliClientResult, "hookEscapes">): string | undefined {
+  const escapes = result.hookEscapes ?? [];
+  if (escapes.length === 0) return undefined;
+  const first = escapes[0]!;
+  return `safety hook notice: ${escapes.length} policy-denied tool call(s) did not come back as the managed hook's denial (first: ${first.tool_name} ${first.kind}). Detection evidence only — the call may have been rejected upstream before the hook ran, blocked by another hook, or executed because the hook drifted. Run /kimi:setup --check; details in \`result <jobId> --json\` (hook_escapes).`;
+}
+
+export function warnHookEscapes(result: Pick<CliClientResult, "hookEscapes">, commandType: string, stderr: NodeJS.WriteStream): void {
+  const note = describeHookEscapes(result);
+  if (note !== undefined) stderr.write(`[${commandType}] ${note}\n`);
+}
+
 export function warnInheritedBudget(job: JobRecord, stderr: NodeJS.WriteStream): void {
   if (job.budget_source === "inherited" && job.budget_ms !== null) {
     stderr.write(`[${job.command_type}] budget ${formatBudgetDuration(job.budget_ms)} inherited from job ${job.resumed_from_job_id}; pass --budget to override\n`);

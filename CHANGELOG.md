@@ -2,6 +2,12 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.2.1 — 2026-10-15
+
+- Request per-run thinking effort with `--thinking <effort>` through the upstream environment binding; persist requested effort and replay it in detached workers without changing saved defaults. The review gate requests `off` by default; provider/model no-op cases remain explicit.
+- Add the hook-escape monitor as detection evidence: replay the pure PreToolUse policy on every streamed tool call and record, for each policy-denied call, whether the model received the managed hook's denial (byte-exact or with upstream's repeat-breaker decoration). Findings (`mismatch`, `unresolved`) are logged, persisted on the job (`hook_escapes`), shown in `status`/`result --json`, printed as a stderr notice and carried in timeout details; the run is never stopped and the job never fails on them, because upstream's pre-hook rejections, coexisting hooks and the repeat breaker produce the same text as a drifted hook. Proven live on CLI 2.2.0 with a deliberately broken hook command (`Write` executed; finding `mismatch`, excerpt `Wrote 7 bytes to ESCAPE.txt`).
+- CLI 2.2.0 remains the certified maximum, unchanged; hook policy decisions, preflight closures, engine selection and teardown are unchanged.
+
 ## 2.2.0 — 2026-10-15
 
 - Port the vendored parser to unmodified smol-toml 1.9.1 JavaScript, closing

@@ -31,7 +31,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 export { describeMissingResult } from "../background-spawn.js";
@@ -57,7 +57,7 @@ export { describeMissingResult } from "../background-spawn.js";
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
 const RESCUE_SUMMARY_MAX = 120;
 const RESCUE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
-// Rescue runs multi-step apply/test/verify loops under thinking-on by
+// Rescue runs multi-step apply/test/verify loops with model-configured thinking by
 // default — uses the longest budget. See KIMI_RESCUE_PROMPT_TIMEOUT_MS
 // in kimi-timeouts.ts for the rationale on the 1800s value.
 
@@ -108,7 +108,8 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       command_type: "rescue",
       cwd: context.cwd,
       model: parsed.model ?? null,
-      thinking: parsed.thinking ?? null,
+      thinking: null,
+      thinking_effort: parsed.thinkingEffort ?? null,
       background: parsed.background,
       budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "rescue" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
       budget_source: parsed.budgetMs !== undefined ? "explicit"
@@ -259,6 +260,7 @@ export async function executeRescueJob(
         commandLabel: "rescue",
         trustedWorkspaceRoot: job.cwd,
         model: job.model ?? undefined,
+        thinkingEffort: job.thinking_effort ?? undefined,
         resumeSessionId: job.kimi_session_id ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,
@@ -280,6 +282,7 @@ export async function executeRescueJob(
     }
 
     assertCliResultSuccess(result, "rescue.runtime");
+    warnHookEscapes(result, "rescue", context.stderr);
 
     if (
       result.sessionId !== undefined &&

@@ -1,6 +1,6 @@
 ---
 description: Run a read-only Kimi review over the current working tree changes or a base ref diff.
-argument-hint: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [extra prose]"
+argument-hint: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [extra prose]"
 disable-model-invocation: true
 ---
 
@@ -10,13 +10,15 @@ Run the companion with any user-supplied flags appended after `review`:
 
 Supported flags:
 
+- `--thinking <off|low|medium|high>` (also `--thinking=<effort>`) — request effort for this process; other model-supported effort tokens pass through. `--no-thinking` is rejected; use `--thinking off`.
+
 - `--budget <dur>` — wall-clock ceiling (default 30m; `30m`, `1h`, `90s`, or bare minutes; maximum 24h)
 
 - `--base <ref>` — review against a branch/commit diff instead of the working tree
 - `-m`, `--model <name>`
 - trailing text — optional focus hint for the review
 
-Reasoning behavior follows the selected model and Kimi configuration. The plugin does not force a thinking mode. The default budget is 30m; use `--budget` to change it. Review runs foreground-synchronously; it does not support `--background` or `--wait`.
+Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). The default budget is 30m; use `--budget` to change it. Review runs foreground-synchronously; it does not support `--background` or `--wait`.
 
 A budget timeout leaves the job `failed` and saves any partial assistant prose in its artifact, labeled **NOT a final answer**. Read it with `result <jobId>` or `result <jobId> --json`; tool-only runs explicitly report no assistant prose. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matches this spawn — created between spawn and settlement in the same directory AND whose journal opens with this job's exact prompt; `result --json` identifies the source in `kimi_session_id_source`, and `error.details.session_recovery` says why no ID was recovered (`none`, `journal_missing:<n>`, `digest_mismatch:<n>`, `ambiguous:<n>`, `enumeration_capped`, `engine_unobserved`). Cancellation does not capture partial output. Use `--help` or `-h` among the leading flags for usage; once prompt text starts, `-h` is part of the prompt. Other failures (nonzero exit, cancellation) do not capture partial output.
 

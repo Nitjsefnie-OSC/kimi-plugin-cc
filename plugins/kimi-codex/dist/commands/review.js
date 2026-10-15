@@ -17,7 +17,7 @@ import { renderManagedJobOutput, writeArtifact } from "../render.js";
 import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // v1.0 cutover note (PR 2):
 //
@@ -79,7 +79,8 @@ export async function runReview(argv, context, commandType) {
         command_type: commandType,
         cwd: context.cwd,
         model: parsed.model ?? null,
-        thinking: parsed.thinking ?? null,
+        thinking: null,
+        thinking_effort: parsed.thinkingEffort ?? null,
         background: false,
         budget_ms: parsed.budgetMs ?? null,
         budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -113,6 +114,7 @@ export async function runReview(argv, context, commandType) {
             prompt: previewPrompt,
             commandLabel: commandType,
             model: parsed.model,
+            thinkingEffort: parsed.thinkingEffort,
             logPath,
             signal: handlers.signal,
         }, job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS, `${commandType}.prompt`);
@@ -121,6 +123,7 @@ export async function runReview(argv, context, commandType) {
             throw new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.afterPrompt, `${commandType}.runtime`);
         }
         assertCliResultSuccess(result, `${commandType}.runtime`);
+        warnHookEscapes(result, commandType, context.stderr);
         // Persist whichever session id kimi announced. Review never resumes,
         // but the id is the only handle for post-hoc replay against
         // ~/.kimi-code/sessions/.

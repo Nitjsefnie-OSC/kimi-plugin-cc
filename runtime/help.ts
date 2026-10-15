@@ -17,7 +17,7 @@ export function companionHelp(argv: string[]): string | undefined {
     : command === "task" && kind !== undefined && !kind.startsWith("-") ? 2
     : 1;
   if (!hasHelpFlag(argv.slice(argumentStart))) return undefined;
-  const suffix = " Use --help or -h among the leading flags (before any prompt text or --) to show this usage.";
+  const suffix = " Thinking effort is a per-run request, not a guarantee. Use --help or -h among the leading flags (before any prompt text or --) to show this usage.";
   const usage = (name: string, positionals: string, flags: string, description: string) =>
     `Usage: companion.sh ${name}${positionals ? ` ${positionals}` : ""}. ${description} Supported flags: ${flags}.${suffix}`;
   switch (command) {

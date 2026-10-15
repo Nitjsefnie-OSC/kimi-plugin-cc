@@ -214,3 +214,28 @@ describe("background hook enforcement (real spawn, no node-bin override)", () =>
     }
   }, 60_000);
 });
+
+for (const kind of ["ask", "rescue"]) {
+  test(`detached ${kind} replays thinking effort and persists hook escapes with real pin verification`, async () => {
+    const { pluginDataRoot, repoFixture, env, nodeSymlink } = await buildFixture("bg-effort-escape");
+    const invocation = path.join(pluginDataRoot, "invocation.json");
+    env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH = invocation;
+    const command = kind === "ask" ? ["ask"] : ["task", "rescue"];
+    try {
+      const result = await run(nodeSymlink, [path.join(REPO_ROOT, "dist/companion.js"), ...command, "--thinking", "off", "--background", "--wait", "inspect"], { cwd: repoFixture, env });
+      expect(result.stdout).toContain("Ask answer from mock Kimi.");
+      const logged = JSON.parse(await (await import("node:fs/promises")).readFile(invocation, "utf8"));
+      expect(logged.env.KIMI_MODEL_THINKING_EFFORT).toBe("off");
+      // Rescue's pure plan denial is covered separately; Write delegates to its filesystem evaluator.
+      if (kind === "ask") {
+        env.KIMI_PLUGIN_CC_MOCK_SCENARIO = "hook-escape-executed";
+        const escaped = await run(nodeSymlink, [path.join(REPO_ROOT, "dist/companion.js"), ...command, "--fresh", "--background", "--wait", "inspect"], { cwd: repoFixture, env });
+        // Detection only: the detached worker completes, keeps delivering, and persists the finding.
+        expect(escaped.stdout).toContain("UNTRUSTED AFTER ESCAPE");
+        const status = JSON.parse((await run(nodeSymlink, [path.join(REPO_ROOT, "dist/companion.js"), "status"], { cwd: repoFixture, env })).stdout);
+        expect(status.status).toBe("completed");
+        expect(status.hook_escapes[0]).toMatchObject({ kind: "mismatch", tool_name: "Write" });
+      }
+    } finally { await cleanupTestPath(pluginDataRoot); await cleanupTestPath(repoFixture); }
+  }, 60000);
+}

@@ -26,10 +26,11 @@ import {
   renderManagedJobOutput,
   writeArtifact,
 } from "../render.js";
+import { validateThinkingEffort } from "../parsing.js";
 import type { CommandContext } from "../types.js";
 import { maybeWarnHookMissing, verifyHookInstalled } from "../hooks/install.js";
 import { resolveKimiHome } from "../kimi-home.js";
-import { assertCliResultSuccess, reassembleProseFromRecords } from "./cli-helpers.js";
+import { assertCliResultSuccess, describeHookEscapes, reassembleProseFromRecords } from "./cli-helpers.js";
 
 const REVIEW_GATE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 
@@ -135,20 +136,21 @@ export async function runReviewGateStopHook(
       context,
     );
 
+    const note = output.hookEscapeNote !== undefined ? `Kimi review gate ${output.hookEscapeNote}` : undefined;
     if (output.decision === "BLOCK" && output.confidence === "high") {
       return {
         decision: "block",
         reason: buildBlockReason(output),
+        ...(note !== undefined ? { systemMessage: note } : {}),
       };
     }
 
     if (output.decision === "BLOCK") {
-      return {
-        systemMessage: `Kimi review gate noted concerns but allowed stop: ${output.summary}`,
-      };
+      const concern = `Kimi review gate noted concerns but allowed stop: ${output.summary}`;
+      return { systemMessage: note !== undefined ? `${concern}\n${note}` : concern };
     }
 
-    return {};
+    return note !== undefined ? { systemMessage: note } : {};
   } catch (error) {
     return {
       systemMessage: buildWarningMessage(error),
@@ -164,7 +166,8 @@ async function executeReviewGate(
   payload: StopHookInput & { cwd: string },
   assistantMessage: string,
   context: CommandContext,
-): Promise<ReviewGateOutput> {
+): Promise<ReviewGateOutput & { hookEscapeNote?: string }> {
+  let hookEscapeNote: string | undefined;
   const paths = resolvePluginPaths(context.env);
   await ensurePluginPaths(paths);
   const repoIdentity = await resolveRepoIdentity(payload.cwd);
@@ -183,6 +186,10 @@ async function executeReviewGate(
       cwd: payload.cwd,
       repoRoot: repoIdentity.repoRoot,
     });
+    // Unset or empty → request "off" (the 8 s budget is why); "inherit" → export
+    // nothing; anything else is lowercased and syntax-checked like --thinking.
+    const gateThinking = context.env.KIMI_PLUGIN_CC_REVIEW_GATE_THINKING?.trim() || "off";
+    const thinkingEffort = gateThinking.toLowerCase() === "inherit" ? undefined : validateThinkingEffort(gateThinking, "review_gate.parse");
     const configuredModel = context.env.KIMI_PLUGIN_CC_REVIEW_GATE_MODEL;
     const model = configuredModel?.trim() ? configuredModel : undefined;
     const executionPlan = await prepareKimiExecutionPlan({
@@ -211,6 +218,7 @@ async function executeReviewGate(
       cwd: payload.cwd,
       model: model ?? null,
       thinking: false,
+      thinking_effort: thinkingEffort ?? null,
       background: false,
       pid: null,
       kimi_pid: null,
@@ -243,13 +251,8 @@ async function executeReviewGate(
           prompt,
           commandLabel: "review_gate",
           model,
-          // Intent: thinking-off so the 8s Stop-hook budget is achievable.
-          // Mechanism: currently advisory — kimi-code 0.1.1 has no CLI
-          // flag for this; control is config-based (default_thinking /
-          // [thinking].mode). The field carries intent through the
-          // contract; when upstream adds a per-spawn flag, buildArgs will
-          // translate it. (Round 2 Codex finding.)
-          thinking: false,
+          // Requested via env; provider/model may ignore it. The 8s budget still applies.
+          thinkingEffort,
           logPath,
         },
         KIMI_REVIEW_GATE_TIMEOUT_MS,
@@ -257,6 +260,9 @@ async function executeReviewGate(
       );
       activeStore.updateRunningJob(job.job_id, observedExecutionFields(result));
       assertCliResultSuccess(result, "review_gate.runtime");
+      // Detection evidence only (runtime/hook-escape.ts): the gate stays fail-open
+      // and annotates its decision; the finding is also on the job row.
+      hookEscapeNote = describeHookEscapes(result);
       if (result.sessionId !== undefined && result.sessionId.length > 0) {
         // length>0 guard matches the other commands (Kimi alpha.4
         // challenge finding #3 — defense-in-depth, since
@@ -291,7 +297,7 @@ async function executeReviewGate(
         final_output_path: artifactPath,
         error: null,
       });
-      return rendered.output as ReviewGateOutput;
+      return { ...(rendered.output as ReviewGateOutput), hookEscapeNote };
     } catch (error) {
       const classified = classifyManagedCommandFailure(error, "review_gate", job.job_id);
       const summary = isTimeoutError(classified) ? "Review gate timed out." : "Review gate failed.";

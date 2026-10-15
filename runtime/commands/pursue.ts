@@ -29,7 +29,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 // /kimi:pursue — autonomous goal mode (kimi-code 0.8.0+ headless `/goal`).
@@ -186,7 +186,8 @@ export async function runPursue(argv: string[], context: CommandContext): Promis
       command_type: "rescue",
       cwd: context.cwd,
       model: parsed.model ?? null,
-      thinking: parsed.thinking ?? null,
+      thinking: null,
+      thinking_effort: parsed.thinkingEffort ?? null,
       background: false,
       budget_ms: parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS,
       budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
@@ -305,6 +306,7 @@ async function executePursueJob(
         commandLabel: "rescue",
         trustedWorkspaceRoot: job.cwd,
         model: job.model ?? undefined,
+        thinkingEffort: job.thinking_effort ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,
       },
@@ -313,6 +315,7 @@ async function executePursueJob(
     );
 
     store.updateRunningJob(job.job_id, observedExecutionFields(result));
+    warnHookEscapes(result, "pursue", context.stderr);
 
     if (handlers.cancelling) {
       throw new RuntimeError("PURSUE_CANCELLED", "Pursue cancelled by user request.", "pursue.runtime");
