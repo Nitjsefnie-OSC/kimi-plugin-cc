@@ -43,6 +43,8 @@ describe("job-store safety_profile column", () => {
         const old = store.getJob("old-1");
         expect(old?.safety_profile).toBeNull();
         expect(old?.budget_ms).toBeNull();
+        expect(old?.budget_source).toBeNull();
+        expect(old?.kimi_session_id_source).toBeNull();
         expect(old?.updated_at).toBe("2026-09-01T00:00:00Z");
 
         const created = store.createJob({
@@ -54,6 +56,7 @@ describe("job-store safety_profile column", () => {
           thinking: null,
           background: false,
           budget_ms: 2_700_000,
+          budget_source: "explicit",
           pid: null,
           kimi_pid: null,
           status: "running",
@@ -73,6 +76,13 @@ describe("job-store safety_profile column", () => {
           error: null,
         });
         expect(created.budget_ms).toBe(2_700_000);
+        expect(created.budget_source).toBe("explicit");
+        const sessionId = "session_26242650-d95f-4805-80d9-c947d309b2c6";
+        expect(store.claimRecoveredSessionId("new-1", sessionId)?.kimi_session_id_source).toBe("recovered_session_dir");
+        store.createJob({ ...created, job_id: "new-2" });
+        // Models a second worker whose earlier scan found the same candidate.
+        expect(store.claimRecoveredSessionId("new-2", sessionId)).toBeNull();
+        expect(store.getJob("new-2")?.kimi_session_id).toBeNull();
         expect(store.getJob("new-1")?.budget_ms).toBe(2_700_000);
         expect(created.safety_profile).toBe("native-v2-no-plan/1");
         expect(store.getJob("new-1")?.safety_profile).toBe("native-v2-no-plan/1");

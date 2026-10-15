@@ -417,15 +417,23 @@ export function normalizeTopLevelInlineHooks(contents, lineEnding) {
         entryCount: hooks.length,
     };
 }
+// Same defaults as smol-toml 1.9.1 parse(); this walker only locates assignments.
+// tests/runtime/toml-walker-context.test.ts asserts these against the vendored parse().
+export function assignmentParseContext(s) {
+    return { s, p: s.charCodeAt(0) === 0xfeff ? 1 : 0, d: 1_000, bi: false, ld: true, uk: 0 };
+}
 function findTopLevelHooksAssignment(contents) {
-    let ptr = skipVoid(contents, 0);
-    while (ptr < contents.length) {
+    const ctx = assignmentParseContext(contents);
+    skipVoid(ctx);
+    while (ctx.p < contents.length) {
         // A root-level direct assignment cannot resume after entering a table.
-        if (contents[ptr] === "[")
+        if (contents[ctx.p] === "[")
             return null;
-        const declarationStart = ptr;
-        const [key, valueStart] = parseKey(contents, ptr);
-        const [, valueEnd] = extractValue(contents, valueStart, undefined, 1_000, undefined);
+        const declarationStart = ctx.p;
+        const key = parseKey(ctx);
+        skipVoid(ctx, true, true);
+        extractValue(ctx, undefined);
+        const valueEnd = ctx.p;
         if (key.length === 1 && key[0] === "hooks") {
             const lineStart = contents.lastIndexOf("\n", declarationStart - 1) + 1;
             const start = /^[\t ]*$/.test(contents.slice(lineStart, declarationStart))
@@ -445,7 +453,7 @@ function findTopLevelHooksAssignment(contents) {
             }
             return { start, end, hadLineEnding };
         }
-        ptr = skipVoid(contents, valueEnd);
+        skipVoid(ctx);
     }
     return null;
 }

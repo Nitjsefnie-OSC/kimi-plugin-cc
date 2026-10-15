@@ -39,7 +39,7 @@ For subscription auth, guide native Kimi `/login`; for API keys or other provide
 
 When invoked:
 
-- preserve `--budget <dur>` (default 30m; `30m`, `1h`, `90s`, or bare minutes, maximum 24h). Backgrounding does not extend this budget. A timed-out job remains failed and its artifact holds partial assistant output labeled NOT a final answer; read it with `result <jobId>` or `result <jobId> --json`. Cancellation does not capture partial output.
+- preserve `--budget <dur>` (default 30m; `30m`, `1h`, `90s`, or bare minutes, maximum 24h). Backgrounding does not extend this budget. A timed-out job remains failed and its artifact holds partial assistant output labeled NOT a final answer; read it with `result <jobId>` or `result <jobId> --json`. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matches this spawn — created between spawn and settlement in the same directory AND whose journal opens with this job's exact prompt; `result --json` identifies the source in `kimi_session_id_source`, and `error.details.session_recovery` says why no ID was recovered (`none`, `journal_missing:<n>`, `digest_mismatch:<n>`, `ambiguous:<n>`, `enumeration_capped`, `engine_unobserved`). Cancellation does not capture partial output.
 
 - decide whether the task belongs to adversarial challenge review rather than ordinary defect review (see kimi-review)
 - preserve any focus text the user supplies after the flags — the user's framing is what steers the challenge

@@ -31,7 +31,7 @@ import {
   maybeWarnHookMissing,
   verifyHookInstalled,
 } from "../hooks/install.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
 export { describeMissingResult } from "../background-spawn.js";
@@ -111,10 +111,13 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       thinking: parsed.thinking ?? null,
       background: parsed.background,
       budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "rescue" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
+      budget_source: parsed.budgetMs !== undefined ? "explicit"
+        : sessionResolution.sourceJob?.operation_kind === "rescue" && sessionResolution.sourceJob.budget_ms !== null ? "inherited" : "default",
       pid: parsed.background ? null : process.pid,
       kimi_pid: null,
       status: "running",
       kimi_session_id: sessionResolution.kimiSessionId,
+      kimi_session_id_source: sessionResolution.sourceJob?.kimi_session_id_source ?? null,
       ...persistedExecutionPlanFields(executionPlan),
       agent_profile: RESCUE_AGENT_PROFILE_PLACEHOLDER,
       prompt_digest: digestPrompt(prompt),
@@ -141,6 +144,8 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       await markJobFailed(store, paths, job, classified, rescueConfig.cancellation.failedSummary, { phase: "failed" });
       throw classified;
     }
+
+    warnInheritedBudget(job, context.stderr);
 
     if (parsed.background) {
       return startBackgroundJob(job, prompt, context, paths, {
@@ -278,12 +283,11 @@ export async function executeRescueJob(
 
     if (
       result.sessionId !== undefined &&
-      result.sessionId.length > 0 &&
-      result.sessionId !== job.kimi_session_id
+      result.sessionId.length > 0
     ) {
       // length>0 guard: empty-string capture would poison the row. (Kimi
       // alpha.4 challenge finding #3.)
-      store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+      store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
       promptText: prompt,
@@ -342,6 +346,12 @@ export async function executeRescueJob(
       }) ?? job
     );
   } catch (error) {
+    const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
+      preserveStage: true,
+      background: job.background,
+      budgetMs: job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS,
+    });
+    const partialOutput = await captureTimeoutPartialOutput(classified, store, job, context.env, handlers.signal);
     if (handlers.cancelling) {
       const cancelledError = new RuntimeError(
         cancel.errorCodes.cancelled,
@@ -359,12 +369,6 @@ export async function executeRescueJob(
       );
     }
 
-    const classified = classifyManagedCommandFailure(error, "rescue", job.job_id, {
-      preserveStage: true,
-      background: job.background,
-      budgetMs: job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS,
-    });
-    const partialOutput = captureTimeoutPartialOutput(classified, store, job);
     return await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed", partialOutput });
   } finally {
     handlers.dispose();

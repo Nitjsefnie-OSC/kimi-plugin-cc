@@ -2,6 +2,27 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.2.0 — 2026-10-15
+
+- Port the vendored parser to unmodified smol-toml 1.9.1 JavaScript, closing
+  GHSA-r4xh-jqrq-34v2; adapt the config assignment walker and retain EOF-comment
+  protection with linear-scaling and shipped-mirror regressions.
+- Recover native-v2 timeout session IDs only from exactly one bounded, matching
+  session-store candidate: created between spawn and settlement in the job's cwd,
+  and whose main journal opens with a user message carrying the job's exact prompt
+  (`prompt_digest`), so attribution is proof, not proximity. Persist
+  announced/recovered provenance in `kimi_session_id_source`, report recovery
+  refusals in error details (`session_recovery`), skip recovery when no
+  `system.version` marker was observed, and retain the existing lineage and raw
+  journal plan-taint checks on every resume.
+- Expose `budget_source` in status and JSON results, and print inherited ask/rescue
+  budgets with their parent job at launch. Historical non-null budgets remain unknown.
+- Allow 30 seconds for installed-state spawn-heavy tests; refresh install examples
+  and preserve the settled result's abort flag in timeout details.
+- Permit deliberate plugin/CLI version-number alignment without treating the number
+  as compatibility evidence. CLI 2.2.0 remains the certified maximum, unchanged;
+  the certification table, hook policy, preflight closures and teardown remain unchanged.
+
 ## 2.0.8 — 2026-10-14
 
 - Certify exact Kimi Code CLI 2.2.0 (`472192c3`) for all eight native-v2 operations under the

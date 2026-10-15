@@ -25,7 +25,5 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-import { TomlDate } from './date.js';
-export declare function parseString(str: string, ptr?: number, endPtr?: number): string;
-export type IntegersAsBigInt = undefined | boolean | 'asNeeded';
-export declare function parseValue(value: string, toml: string, ptr: number, integersAsBigInt: IntegersAsBigInt): boolean | number | bigint | TomlDate;
+import type { ParseContext } from './util.js';
+export declare function parseString(ctx: ParseContext): string;

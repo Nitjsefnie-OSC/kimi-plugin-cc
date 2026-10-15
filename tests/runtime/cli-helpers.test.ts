@@ -91,6 +91,7 @@ describe("assertCliResultSuccess", () => {
   function makeResult(overrides: Partial<CliClientResult>): CliClientResult {
     return {
       sessionId: undefined,
+      spawnedAt: 0, settledAt: 1,
       records: [],
       malformed: [],
       stderrTail: "",
@@ -174,6 +175,7 @@ describe("warnIfSessionIdMissing", () => {
   function makeResult(overrides: Partial<CliClientResult>): CliClientResult {
     return {
       sessionId: undefined,
+      spawnedAt: 0, settledAt: 1,
       records: [],
       malformed: [],
       stderrTail: "",

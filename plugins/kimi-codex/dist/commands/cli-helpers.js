@@ -1,6 +1,9 @@
 import { RuntimeError } from "../errors.js";
 import { ResponseTimeoutError } from "../cli-client.js";
 import { observedExecutionFields } from "../kimi-engine.js";
+import { resolveKimiHome } from "../kimi-home.js";
+import { recoverSessionIdFromStore } from "../session-recovery.js";
+import { formatBudgetDuration } from "../render.js";
 /**
  * Reassemble prose final text from cli-client records.
  *
@@ -112,12 +115,42 @@ export function assertCliResultSuccess(result, stage) {
         });
     }
 }
-/** Timeout-only capture, called after cancellation has taken precedence. No title sync on failure. */
-export function captureTimeoutPartialOutput(classified, store, job) {
+/** Timeout-only capture. Cancellation takes precedence, including while the
+ * asynchronous store scan is in flight. No title sync on failure. */
+export async function captureTimeoutPartialOutput(classified, store, job, env, cancellationSignal) {
+    if (cancellationSignal?.aborted)
+        return undefined;
     const timeout = classified.cause;
     if (!(timeout instanceof ResponseTimeoutError) || !timeout.partialResult)
         return undefined;
     const result = timeout.partialResult;
+    let sessionId = result.sessionId;
+    let source = sessionId ? "announced" : null;
+    const details = classified instanceof RuntimeError ? classified.details : timeout.details;
+    details.kimi_session_id_source = job.kimi_session_id_source;
+    // The persisted plan is plugin-owned. Recovery never runs on cancellation,
+    // v1, successful turns, teardown rejection, or an already-known resume id.
+    if (!sessionId && !job.kimi_session_id && job.intended_engine === "native-v2") {
+        // Without the system.version marker the row has no proven engine, and
+        // resume would refuse the id as lineage-unknown; do not advertise one.
+        if (result.observedEngine === null) {
+            details.session_recovery = "engine_unobserved";
+        }
+        else {
+            const recovered = await recoverSessionIdFromStore({
+                kimiHome: resolveKimiHome(env, job.cwd), cwd: job.cwd,
+                spawnedAt: result.spawnedAt, settledAt: result.settledAt, promptDigest: job.prompt_digest,
+                store, jobId: job.job_id,
+            });
+            sessionId = recovered.sessionId;
+            if (sessionId)
+                source = "recovered_session_dir";
+            else
+                details.session_recovery = recovered.reason;
+        }
+    }
+    if (cancellationSignal?.aborted)
+        return undefined;
     // Best-effort metadata only. The row is still `running`, and a session id
     // written here can collide with `jobs_running_session_idx` when a resume of
     // the same session was started while this job ran. A store error must never
@@ -125,11 +158,22 @@ export function captureTimeoutPartialOutput(classified, store, job) {
     // than the metadata, so swallow and fall through.
     try {
         store.updateRunningJob(job.job_id, observedExecutionFields(result));
-        if (result.sessionId !== undefined && result.sessionId.length > 0 && result.sessionId !== job.kimi_session_id) {
-            store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+        if (sessionId) {
+            const updated = source === "recovered_session_dir"
+                ? store.claimRecoveredSessionId(job.job_id, sessionId)
+                : store.updateRunningJob(job.job_id, { kimi_session_id: sessionId, kimi_session_id_source: source });
+            if (updated?.kimi_session_id === sessionId && updated.kimi_session_id_source === source) {
+                details.kimi_session_id = sessionId;
+                details.kimi_session_id_source = source;
+            }
+            else
+                details[source === "recovered_session_dir" ? "session_recovery" : "session_id_persistence"] = "persistence_failed";
         }
     }
     catch {
+        // `session_recovery` describes only the recovery branch; an announced id or
+        // the provenance update failing is a different fact.
+        details[source === "recovered_session_dir" ? "session_recovery" : "session_id_persistence"] = "persistence_failed";
         // Diagnostics stay in the stream log; the failure transition proceeds.
     }
     return {
@@ -140,4 +184,9 @@ export function captureTimeoutPartialOutput(classified, store, job) {
         recordCount: result.records.length,
         budgetMs: timeout.details.budget_ms,
     };
+}
+export function warnInheritedBudget(job, stderr) {
+    if (job.budget_source === "inherited" && job.budget_ms !== null) {
+        stderr.write(`[${job.command_type}] budget ${formatBudgetDuration(job.budget_ms)} inherited from job ${job.resumed_from_job_id}; pass --budget to override\n`);
+    }
 }

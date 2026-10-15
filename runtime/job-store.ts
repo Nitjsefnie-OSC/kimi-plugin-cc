@@ -24,6 +24,7 @@ export interface JobRecord {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
+  kimi_session_id_source: "announced" | "recovered_session_dir" | null;
   /** Real operation; null means a historical row without proven provenance. */
   operation_kind: KimiOperationKind | null;
   intended_engine: KimiEngine | null;
@@ -47,6 +48,7 @@ export interface JobRecord {
    * pattern for a safety-relevant field. Pursue/swarm persist the effective ceiling.
    */
   budget_ms: number | null;
+  budget_source: "explicit" | "inherited" | "default" | null;
   final_output_path: string | null;
   stream_log_path: string;
   error: JobError | null;
@@ -64,6 +66,7 @@ export interface CreateJobInput {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
+  kimi_session_id_source?: "announced" | "recovered_session_dir" | null;
   operation_kind?: KimiOperationKind | null;
   intended_engine?: KimiEngine | null;
   observed_engine?: KimiEngine | null;
@@ -79,6 +82,7 @@ export interface CreateJobInput {
   summary: string;
   phase?: string | null;
   budget_ms?: number | null;
+  budget_source?: JobRecord["budget_source"];
   final_output_path: string | null;
   stream_log_path: string;
   error: JobError | null;
@@ -173,6 +177,12 @@ export class JobStore {
       this.db.exec(`ALTER TABLE jobs ADD COLUMN budget_ms INTEGER;`);
     }
 
+    for (const column of ["kimi_session_id_source", "budget_source"]) {
+      if (!tableHasColumn(this.db, column)) {
+        this.db.exec("ALTER TABLE jobs ADD COLUMN " + column + " TEXT;");
+      }
+    }
+
     // Additive provenance migration. Existing rows deliberately remain NULL:
     // v1.9.5 plus kimi-code 0.33/0.34 could have routed to native v2 before the
     // legacy pin landed, so a blanket historical v1 backfill would invent fact.
@@ -201,6 +211,8 @@ export class JobStore {
 
       CREATE INDEX IF NOT EXISTS jobs_repo_type_updated_idx
         ON jobs (repo_id, command_type, updated_at DESC);
+
+      CREATE INDEX IF NOT EXISTS jobs_session_id_idx ON jobs (kimi_session_id);
 
       CREATE INDEX IF NOT EXISTS jobs_session_idx
         ON jobs (repo_id, kimi_session_id, updated_at DESC);
@@ -268,14 +280,14 @@ export class JobStore {
         `
           INSERT INTO jobs (
             job_id, repo_id, command_type, created_at, updated_at, cwd, model, thinking,
-            background, pid, kimi_pid, status, kimi_session_id,
+            background, pid, kimi_pid, status, kimi_session_id, kimi_session_id_source, budget_source,
             operation_kind, intended_engine, observed_engine, kimi_version, system_version,
             kimi_command, kimi_prefix_args, plan_certification, resumed_from_job_id, safety_profile,
             agent_profile, prompt_digest, summary, phase, budget_ms, final_output_path, stream_log_path, error
           )
           VALUES (
             @job_id, @repo_id, @command_type, @created_at, @updated_at, @cwd, @model, @thinking,
-            @background, @pid, @kimi_pid, @status, @kimi_session_id,
+            @background, @pid, @kimi_pid, @status, @kimi_session_id, @kimi_session_id_source, @budget_source,
             @operation_kind, @intended_engine, @observed_engine, @kimi_version, @system_version,
             @kimi_command, @kimi_prefix_args, @plan_certification, @resumed_from_job_id, @safety_profile,
             @agent_profile, @prompt_digest, @summary, @phase, @budget_ms, @final_output_path, @stream_log_path, @error
@@ -315,6 +327,12 @@ export class JobStore {
   getJob(jobId: string): JobRecord | null {
     const row = this.db.get<DbRow>("SELECT * FROM jobs WHERE job_id = ?", jobId);
     return row ? hydrateRow(row) : null;
+  }
+
+  /** Global across repos and terminal states; optionally exclude the current row. */
+  hasSessionId(sessionId: string, exceptJobId = ""): boolean {
+    return Boolean(this.db.get("SELECT 1 FROM jobs WHERE kimi_session_id = ? AND job_id != ? LIMIT 1",
+      sessionId, exceptJobId));
   }
 
   findLatestJob(options: FindLatestJobOptions): JobRecord | null {
@@ -391,6 +409,20 @@ export class JobStore {
     return this.updateWhere(jobId, patch, "status = 'running'");
   }
 
+  /** Recheck uniqueness atomically: another worker can claim an ID during the
+   * asynchronous directory scan. Ordinary announced/resumed IDs may be shared. */
+  claimRecoveredSessionId(jobId: string, sessionId: string): JobRecord | null {
+    this.db.run(`UPDATE jobs
+      SET kimi_session_id = @session_id, kimi_session_id_source = 'recovered_session_dir',
+          updated_at = @updated_at
+      WHERE job_id = @job_id AND status = 'running' AND kimi_session_id IS NULL
+        AND NOT EXISTS (SELECT 1 FROM jobs WHERE kimi_session_id = @session_id AND job_id != @job_id)`,
+      { job_id: jobId, session_id: sessionId, updated_at: new Date().toISOString() });
+    const job = this.getJob(jobId);
+    return job?.status === "running" && job.kimi_session_id === sessionId &&
+      job.kimi_session_id_source === "recovered_session_dir" ? job : null;
+  }
+
   /**
    * Evidence-only backfill for pre-provenance rows. COALESCE prevents forensic
    * inspection from overwriting a field already recorded at execution time.
@@ -443,7 +475,7 @@ export class JobStore {
   }
 
   private static readonly JOBS_COLUMNS = new Set([
-    "status", "summary", "phase", "budget_ms", "pid", "kimi_pid",
+    "status", "summary", "phase", "budget_ms", "budget_source", "kimi_session_id_source", "pid", "kimi_pid",
     "final_output_path", "stream_log_path", "kimi_session_id",
     "error", "command_type", "prompt_digest", "repo_id",
     "cwd", "model", "thinking", "background", "agent_profile",
@@ -502,6 +534,7 @@ interface DbRow {
   kimi_pid: number | null;
   status: JobStatus;
   kimi_session_id: string | null;
+  kimi_session_id_source: "announced" | "recovered_session_dir" | null;
   operation_kind: KimiOperationKind | null;
   intended_engine: KimiEngine | null;
   observed_engine: KimiEngine | null;
@@ -517,6 +550,7 @@ interface DbRow {
   summary: string;
   phase: string | null;
   budget_ms: number | null;
+  budget_source: "explicit" | "inherited" | "default" | null;
   final_output_path: string | null;
   stream_log_path: string;
   error: string | null;
@@ -536,6 +570,8 @@ function serializeRecord(record: CreateJobInput): Record<string, unknown> {
     ...record,
     phase: record.phase ?? null,
     budget_ms: record.budget_ms ?? null,
+    budget_source: record.budget_source ?? null,
+    kimi_session_id_source: record.kimi_session_id_source ?? null,
     operation_kind: record.operation_kind ?? null,
     intended_engine: record.intended_engine ?? null,
     observed_engine: record.observed_engine ?? null,
@@ -831,4 +867,9 @@ export function withJobStoreSync<T>(
   } finally {
     store?.close();
   }
+}
+
+/** Old non-null budgets have unknown provenance; never invent explicit intent. */
+export function renderBudgetSource(job: Pick<JobRecord, "budget_source" | "budget_ms">): string {
+  return job.budget_source ?? (job.budget_ms === null ? "default" : "unknown");
 }

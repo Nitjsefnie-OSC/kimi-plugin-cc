@@ -26,7 +26,12 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 import type { TomlDate } from './date.js';
-export type TomlPrimitive = string | number | bigint | boolean | TomlDate;
+type _Temporal = typeof globalThis extends {
+    Temporal: infer T;
+} ? T : never;
+type AnyTemporalDateTime = InstanceType<_Temporal['Instant']> | InstanceType<_Temporal['PlainDate']> | InstanceType<_Temporal['PlainDateTime']> | InstanceType<_Temporal['PlainTime']> | InstanceType<_Temporal['ZonedDateTime']>;
+export type IntegersAsBigInt = undefined | boolean | 'asNeeded';
+export type TomlPrimitive = string | number | bigint | boolean | TomlDate | AnyTemporalDateTime;
 export type TomlTable = {
     [key: string]: TomlValue;
 };
@@ -35,8 +40,16 @@ export type TomlTableWithoutBigInt = {
     [key: string]: TomlValueWithoutBigInt;
 };
 export type TomlValueWithoutBigInt = Exclude<TomlPrimitive, bigint> | TomlValueWithoutBigInt[] | TomlTableWithoutBigInt;
-export declare function indexOfNewline(str: string, start?: number, end?: number): number;
-export declare function skipComment(str: string, ptr: number): number;
-export declare function skipVoid(str: string, ptr: number, banNewLines?: boolean, banComments?: boolean): number;
-export declare function skipUntil(str: string, ptr: number, sep: string, end?: string, banNewLines?: boolean): number;
-export declare function getStringEnd(str: string, seek: number): number;
+export {};
+
+// Local declarations for upstream's internal context API (JavaScript unchanged).
+export interface ParseContext {
+    s: string;
+    p: number;
+    d: number;
+    bi: IntegersAsBigInt;
+    ld: boolean;
+    uk: 0 | 1 | 2;
+}
+export declare function skipComment(ctx: ParseContext): void;
+export declare function skipVoid(ctx: ParseContext, banNewLines?: boolean, banComments?: boolean): void;

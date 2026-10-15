@@ -25,8 +25,7 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-import { type IntegersAsBigInt } from './primitive.js';
-import { type TomlTable, type TomlValue } from './util.js';
-export declare function parseKey(str: string, ptr: number, end?: string): [string[], number];
-export declare function parseInlineTable(str: string, ptr: number, depth: number, integersAsBigInt: IntegersAsBigInt): [TomlTable, number];
-export declare function parseArray(str: string, ptr: number, depth: number, integersAsBigInt: IntegersAsBigInt): [TomlValue[], number];
+import type { ParseContext, TomlTable, TomlValue } from './util.js';
+export declare function parseKey(ctx: ParseContext, end?: number): string[];
+export declare function parseInlineTable(ctx: ParseContext): TomlTable;
+export declare function parseArray(ctx: ParseContext): TomlValue[];

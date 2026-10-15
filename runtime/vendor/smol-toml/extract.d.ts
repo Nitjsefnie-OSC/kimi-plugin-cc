@@ -25,6 +25,5 @@
  * OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
-import { type IntegersAsBigInt } from './primitive.js';
-import { type TomlValue } from './util.js';
-export declare function extractValue(str: string, ptr: number, end: string | undefined, depth: number, integersAsBigInt: IntegersAsBigInt): [TomlValue, number];
+import type { ParseContext, TomlValue } from './util.js';
+export declare function extractValue(ctx: ParseContext, end: number | undefined): TomlValue;

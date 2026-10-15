@@ -1,6 +1,6 @@
-# Native v2 status — 2026-10-14
+# Native v2 status — 2026-10-15
 
-Plugin 2.0.8 certifies exact CLI 2.2.0 for all eight operations under the
+Plugin 2.2.0 (as did 2.0.8) certifies exact CLI 2.2.0 for all eight operations under the
 unchanged no-plan construction, alongside every previously certified version
 (0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2, 2.1.0, 2.1.1). All twelve pinned
 construction/schema files are byte-identical to 2.1.1. Plan-ON still writes the

@@ -2,7 +2,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
 import { reconcileHistoricalJobProvenance } from "../kimi-engine.js";
-import { withJobStore } from "../job-store.js";
+import { renderBudgetSource, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 export async function runStatus(argv, context) {
@@ -22,6 +22,6 @@ export async function runStatus(argv, context) {
             throw new RuntimeError("JOB_NOT_FOUND", "No matching job was found for status.", "status.lookup");
         }
         const job = await reconcileHistoricalJobProvenance(store, found);
-        return `${JSON.stringify(job, null, 2)}\n`;
+        return `${JSON.stringify({ ...job, budget_source: renderBudgetSource(job) }, null, 2)}\n`;
     });
 }

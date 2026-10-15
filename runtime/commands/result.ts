@@ -2,7 +2,7 @@ import { RuntimeError } from "../errors.js";
 import { resolveRepoIdentity } from "../git.js";
 import { sweepStaleJobs } from "../jobs.js";
 import { reconcileHistoricalJobProvenance } from "../kimi-engine.js";
-import { withJobStore, type JobRecord } from "../job-store.js";
+import { renderBudgetSource, withJobStore, type JobRecord } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
 import { readArtifact, renderTerminalJobArtifact } from "../render.js";
@@ -58,6 +58,8 @@ function renderResultEnvelope(
       kind: job.command_type,
       status: job.status,
       budget_ms: job.budget_ms,
+      budget_source: renderBudgetSource(job),
+      kimi_session_id_source: job.kimi_session_id_source,
       kimi_session_id: job.kimi_session_id,
       // True when a budget timeout preserved assistant prose in the artifact.
       partial_output: job.status === "failed" && Number(job.error?.details?.partial_output_chars ?? 0) > 0,

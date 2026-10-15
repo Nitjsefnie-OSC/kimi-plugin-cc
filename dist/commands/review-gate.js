@@ -153,6 +153,7 @@ async function executeReviewGate(payload, assistantMessage, context) {
             kimi_pid: null,
             status: "running",
             kimi_session_id: null,
+            budget_source: "default",
             ...persistedExecutionPlanFields(executionPlan),
             agent_profile: REVIEW_GATE_AGENT_PROFILE_PLACEHOLDER,
             prompt_digest: digestPrompt(prompt),
@@ -195,7 +196,7 @@ async function executeReviewGate(payload, assistantMessage, context) {
                 // can't synthesize empty strings today, but the guard locks the
                 // SQLite contract independent of upstream behavior).
                 activeStore.updateRunningJob(job.job_id, {
-                    kimi_session_id: result.sessionId,
+                    kimi_session_id_source: "announced", kimi_session_id: result.sessionId,
                 });
             }
             const finalText = reassembleProseFromRecords(result.records);

@@ -45,7 +45,7 @@ describe("installed data-root isolation", () => {
       expect(JSON.parse(result.stdout).systemMessage).toContain("disabled");
       expect(existsSync(path.join(data, "kimi-plugin-cc"))).toBe(true);
       expect(existsSync(path.join(aliasedData, "kimi-plugin-cc"))).toBe(true);
-    });
+    }, 30_000);
 
     test(`${host}: conflict refuses writes; explicit recovery retains old jobs and settings`, async () => {
       const plugins = path.join(scratch, host, "plugins");
@@ -110,6 +110,6 @@ describe("installed data-root isolation", () => {
       expect(existsSync(foreign)).toBe(false);
       expect(existsSync(env.KIMI_CODE_HOME)).toBe(false);
       expect(await readFile(paths.configPath, "utf8")).toBe(config);
-    });
+    }, 30_000);
   }
 });

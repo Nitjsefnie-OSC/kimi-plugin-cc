@@ -108,6 +108,7 @@ export async function runReview(
     thinking: parsed.thinking ?? null,
     background: false,
     budget_ms: parsed.budgetMs ?? null,
+    budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
     pid: process.pid,
     kimi_pid: null,
     status: "running",
@@ -167,7 +168,7 @@ export async function runReview(
       // poison the row — consumers reading SQLite distinguish "missing"
       // (NULL) from "captured" (non-empty UUID) only via NULL-ness.
       // (Kimi alpha.4 challenge finding #3.)
-      store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+      store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
       promptText: previewPrompt,
@@ -202,6 +203,8 @@ export async function runReview(
     });
     return rendered.output as string;
   } catch (error) {
+    const classified = classifyManagedCommandFailure(error, commandType, job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS });
+    const partialOutput = await captureTimeoutPartialOutput(classified, store, job, context.env, handlers.signal);
     if (handlers.cancelling) {
       const cancelledError = new RuntimeError(
         cancel.errorCodes.cancelled,
@@ -212,8 +215,6 @@ export async function runReview(
       await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError);
       throw cancelledError;
     }
-    const classified = classifyManagedCommandFailure(error, commandType, job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS });
-    const partialOutput = captureTimeoutPartialOutput(classified, store, job);
     await markJobFailed(store, paths, job, classified, cancel.failedSummary, { partialOutput });
     throw classified;
   } finally {

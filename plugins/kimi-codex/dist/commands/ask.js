@@ -17,7 +17,7 @@ import { readArtifact, renderManagedJobOutput, writeArtifact } from "../render.j
 import { classifyManagedCommandFailure } from "../kimi-errors.js";
 import { startBackgroundJob } from "../background-spawn.js";
 import { hookRefusalDetails, hookRefusalRetryProtocol, maybeWarnHookMissing, verifyHookInstalled, } from "../hooks/install.js";
-import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
+import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 // v1.0 cutover note (PR 2):
 //
@@ -80,10 +80,13 @@ export async function runAsk(argv, context) {
             thinking: parsed.thinking ?? null,
             background: parsed.background,
             budget_ms: parsed.budgetMs ?? (sessionResolution.sourceJob?.operation_kind === "ask" ? sessionResolution.sourceJob.budget_ms : null) ?? null,
+            budget_source: parsed.budgetMs !== undefined ? "explicit"
+                : sessionResolution.sourceJob?.operation_kind === "ask" && sessionResolution.sourceJob.budget_ms !== null ? "inherited" : "default",
             pid: parsed.background ? null : process.pid,
             kimi_pid: null,
             status: "running",
             kimi_session_id: sessionResolution.kimiSessionId,
+            kimi_session_id_source: sessionResolution.sourceJob?.kimi_session_id_source ?? null,
             ...persistedExecutionPlanFields(executionPlan),
             agent_profile: ASK_AGENT_PROFILE_PLACEHOLDER,
             prompt_digest: digestPrompt(askPrompt),
@@ -105,6 +108,7 @@ export async function runAsk(argv, context) {
             await markJobFailed(store, paths, job, classified, askConfig.cancellation.failedSummary, { phase: "failed" });
             throw classified;
         }
+        warnInheritedBudget(job, context.stderr);
         if (parsed.background) {
             return startBackgroundJob(job, askPrompt, context, paths, {
                 workerKind: "ask",
@@ -184,12 +188,11 @@ export async function executeAskJob(jobId, prompt, context, options) {
         // sessions it should match the input, but capture anyway in case
         // kimi-code mints a new id on each turn.
         if (result.sessionId !== undefined &&
-            result.sessionId.length > 0 &&
-            result.sessionId !== job.kimi_session_id) {
+            result.sessionId.length > 0) {
             // length>0 guard: empty-string capture would poison the row. The
             // warning helper's null-ish check would also fire but only after
             // the bad write. (Kimi alpha.4 challenge finding #3.)
-            store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+            store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
         }
         await syncKimiSessionTitle({
             promptText: prompt,
@@ -219,6 +222,9 @@ export async function executeAskJob(jobId, prompt, context, options) {
         }) ?? job);
     }
     catch (error) {
+        const classified = error instanceof RuntimeError && error.stage === "ask.hook-check" ? error
+            : classifyManagedCommandFailure(error, "ask", job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS });
+        const partialOutput = await captureTimeoutPartialOutput(classified, store, job, context.env, handlers?.signal);
         if (handlers?.cancelling) {
             const cancelledError = new RuntimeError(cancel.errorCodes.cancelled, cancel.cancelMessages.default, "ask.runtime", error instanceof Error ? { cause: error } : undefined);
             return await markJobCancelled(store, paths, job, cancel.cancelledSummary, cancelledError, { phase: "cancelled" });
@@ -231,8 +237,6 @@ export async function executeAskJob(jobId, prompt, context, options) {
             await markJobFailed(store, paths, job, error, cancel.failedSummary, { phase: "failed" });
             throw error;
         }
-        const classified = classifyManagedCommandFailure(error, "ask", job.job_id, { background: job.background, budgetMs: job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS });
-        const partialOutput = captureTimeoutPartialOutput(classified, store, job);
         await markJobFailed(store, paths, job, classified, cancel.failedSummary, { phase: "failed", partialOutput });
         throw classified;
     }

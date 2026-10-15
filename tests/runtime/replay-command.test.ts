@@ -69,6 +69,8 @@ function makeAskJob(logPath: string): JobRecord {
     summary: "ask",
     phase: null,
     budget_ms: null,
+    budget_source: null,
+    kimi_session_id_source: null,
     final_output_path: null,
     stream_log_path: logPath,
     error: null,

@@ -792,9 +792,12 @@ describe("runCliPrompt", () => {
       await sleepMs(100);
       expect(settled).toBe(false);
 
+      const releasedAt = Date.now();
       releaseCollector();
       const result = await runPromise;
       expect(result.aborted).toBe(true);
+      expect(result.settledAt).toBeGreaterThanOrEqual(releasedAt);
+      expect(result.spawnedAt).toBeLessThanOrEqual(releasedAt);
     } finally {
       releaseCollector();
       await runPromise?.catch(() => undefined);
@@ -2037,6 +2040,7 @@ describe("runCliPromptWithBudget", () => {
       } else {
         expect(outcome).toBeInstanceOf(ResponseTimeoutError);
         expect((outcome as ResponseTimeoutError).details.settled_post_abort).toBe(true);
+        expect((outcome as ResponseTimeoutError).details.aborted).toBe(false);
         expect((outcome as ResponseTimeoutError).partialResult).toMatchObject({ exitCode, aborted: false });
       }
     } finally {
@@ -2063,6 +2067,7 @@ describe("runCliPromptWithBudget", () => {
       ).catch((error: unknown) => error);
       expect(error).toBeInstanceOf(ResponseTimeoutError);
       const timeout = error as ResponseTimeoutError;
+      expect(timeout.partialResult!.settledAt).toBeGreaterThanOrEqual(timeout.partialResult!.spawnedAt);
       expect(timeout.message).not.toContain("race");
       expect(timeout.partialResult?.records).toEqual([{ role: "assistant", content: "late" }]);
       expect(timeout.partialResult?.aborted).toBe(true);

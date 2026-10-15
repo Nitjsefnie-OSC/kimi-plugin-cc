@@ -26,88 +26,32 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 import { TomlError } from './error.js';
-function isEscaped(str, ptr) {
-    let i = 0;
-    while (str[ptr - ++i] === '\\')
-        ;
-    return --i && (i % 2);
-}
-export function indexOfNewline(str, start = 0, end = str.length) {
-    let idx = str.indexOf('\n', start);
-    if (str[idx - 1] === '\r')
-        idx--;
-    return idx <= end ? idx : -1;
-}
-export function skipComment(str, ptr) {
-    for (let i = ptr; i < str.length; i++) {
-        let c = str[i];
-        if (c === '\n')
-            return i;
-        if (c === '\r' && str[i + 1] === '\n')
-            return i + 1;
-        if ((c < '\x20' && c !== '\t') || c === '\x7f') {
-            throw new TomlError('control characters are not allowed in comments', {
-                toml: str,
-                ptr: ptr,
-            });
-        }
-    }
-    return str.length;
-}
-export function skipVoid(str, ptr, banNewLines, banComments) {
-    let c;
-    while (1) {
-        while ((c = str[ptr]) === ' ' || c === '\t' || (!banNewLines && (c === '\n' || c === '\r' && str[ptr + 1] === '\n')))
-            ptr++;
-        // Tucking the return statement here would save 5 characters >:)
-        // But TypeScript fails to detect there is no way to exit the loop so it complains about the lack of final return
-        if (banComments || c !== '#')
+/** @internal */
+export function skipComment(ctx) {
+    for (; ctx.p < ctx.s.length; ctx.p++) {
+        let c = ctx.s.charCodeAt(ctx.p);
+        if (c === 0xa /* \n */)
             break;
-        ptr = skipComment(str, ptr);
+        if (c === 0xd /* \r */ && ctx.s.charCodeAt(ctx.p + 1) === 0xa /* \n */) {
+            ctx.p++;
+            break;
+        }
+        if ((c < 0x20 && c !== 0x9 /* \t */) || c === 0x7f) {
+            TomlError.x('control characters are not allowed in comments', ctx);
+        }
     }
-    return ptr;
 }
-export function skipUntil(str, ptr, sep, end, banNewLines = false) {
-    if (!end) {
-        ptr = indexOfNewline(str, ptr);
-        return ptr < 0 ? str.length : ptr;
+/** @internal */
+export function skipVoid(ctx, banNewLines, banComments) {
+    let c;
+    while (ctx.p < ctx.s.length) {
+        while (ctx.p < ctx.s.length && ((c = ctx.s.charCodeAt(ctx.p)) === 0x20 ||
+            c === 0x9 /* \t */ ||
+            (!banNewLines &&
+                (c === 0xa /* \n */ || (c === 0xd /* \r */ && ctx.s.charCodeAt(ctx.p + 1) === 0xa /* \n */)))))
+            ctx.p++;
+        if (banComments || c !== 0x23 /* # */)
+            break;
+        skipComment(ctx);
     }
-    for (let i = ptr; i < str.length; i++) {
-        let c = str[i];
-        if (c === '#') {
-            i = indexOfNewline(str, i);
-            if (i < 0)
-                break;
-        }
-        else if (c === sep) {
-            return i + 1;
-        }
-        else if (c === end || (banNewLines && (c === '\n' || (c === '\r' && str[i + 1] === '\n')))) {
-            return i;
-        }
-    }
-    throw new TomlError('cannot find end of structure', {
-        toml: str,
-        ptr: ptr
-    });
-}
-export function getStringEnd(str, seek) {
-    let first = str[seek];
-    let target = first === str[seek + 1] && str[seek + 1] === str[seek + 2]
-        ? str.slice(seek, seek + 3)
-        : first;
-    seek += target.length - 1;
-    do
-        seek = str.indexOf(target, ++seek);
-    while (seek > -1 && first !== "'" && isEscaped(str, seek));
-    if (seek > -1) {
-        seek += target.length;
-        if (target.length > 1) {
-            if (str[seek] === first)
-                seek++;
-            if (str[seek] === first)
-                seek++;
-        }
-    }
-    return seek;
 }

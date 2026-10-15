@@ -84,7 +84,9 @@ export async function runCliPrompt(opts) {
         });
     }
     let child;
+    let spawnedAt;
     try {
+        spawnedAt = Date.now();
         child = spawn(opts.command, args, {
             cwd: opts.cwd,
             env,
@@ -329,7 +331,7 @@ export async function runCliPrompt(opts) {
                     return;
                 }
                 if (kind === "resolve")
-                    resolve(payload);
+                    resolve({ ...payload, settledAt: Date.now() });
                 else
                     reject(payload);
             });
@@ -580,6 +582,8 @@ export async function runCliPrompt(opts) {
             // The result itself is in memory; diagnostics are best-effort.
             await raceWithTimeout(logChain, LOG_DRAIN_TIMEOUT_MS);
             settle("resolve", {
+                spawnedAt,
+                settledAt: 0, // Filled at settlement, after the teardown barrier.
                 sessionId,
                 goalSummary: announcedGoalSummary,
                 systemVersion: announcedSystemVersion,
@@ -656,7 +660,9 @@ export function requireSessionId(result, context) {
         },
     });
 }
-/** Settled timeout data; stream records are deliberately non-serializable. */
+/** Settled timeout data; stream records are deliberately non-serializable.
+ * Without a partial result (teardown rejection), aborted means abort was issued,
+ * not that the process was observed aborting. */
 export class ResponseTimeoutError extends RuntimeError {
     constructor(budgetMs, stage, commandLabel, partialResult, cause) {
         super("RESPONSE_TIMEOUT", `${stage} timed out after ${budgetMs}ms.`, stage, {
@@ -666,7 +672,7 @@ export class ResponseTimeoutError extends RuntimeError {
                 command_label: commandLabel ?? null,
                 record_count: partialResult?.records.length ?? 0,
                 partial_output_chars: partialResult?.records.reduce((count, record) => count + (record.role === "assistant" && typeof record.content === "string" ? record.content.length : 0), 0) ?? 0,
-                aborted: true,
+                aborted: partialResult?.aborted ?? true,
                 ...(partialResult ? { settled_post_abort: true } : {}),
             },
         });

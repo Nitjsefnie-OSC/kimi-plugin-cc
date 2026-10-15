@@ -189,6 +189,7 @@ export async function runPursue(argv: string[], context: CommandContext): Promis
       thinking: parsed.thinking ?? null,
       background: false,
       budget_ms: parsed.budgetMs ?? KIMI_PURSUE_DEFAULT_BUDGET_MS,
+      budget_source: parsed.budgetMs !== undefined ? "explicit" : "default",
       pid: process.pid,
       kimi_pid: null,
       status: "running",
@@ -331,7 +332,7 @@ async function executePursueJob(
       result.sessionId.length > 0 &&
       result.sessionId !== job.kimi_session_id
     ) {
-      store.updateRunningJob(job.job_id, { kimi_session_id: result.sessionId });
+      store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
       promptText: objective,

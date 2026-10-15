@@ -22,7 +22,8 @@
 //   KIMI_PLUGIN_CC_MOCK_SESSION_ID    override session id announced in stderr
 
 import { randomUUID } from "node:crypto";
-import { writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
+import path from "node:path";
 
 const scenario = process.env.KIMI_PLUGIN_CC_MOCK_SCENARIO ?? "ask-success";
 const invocationPath = process.env.KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH;
@@ -83,6 +84,28 @@ async function main(): Promise<void> {
     await sleep(delayMs);
   }
 
+  const recoverableV2 = process.env.KIMI_PLUGIN_CC_MOCK_RECOVERABLE_V2 === "1";
+  if (recoverableV2) {
+    process.stdout.write(`${JSON.stringify({ role: "meta", type: "system.version", version: process.env.KIMI_PLUGIN_CC_MOCK_VERSION })}\n`);
+    // A real v2 turn creates state before work, but announces only at turn end.
+    // Never overwrite an existing journal on resume (the preflight reads it).
+    if (!process.argv.includes("-r") && process.env.KIMI_PLUGIN_CC_MOCK_NO_SESSION_STORE !== "1") {
+      const dir = path.join(process.env.KIMI_CODE_HOME!, "sessions/wd_mock", sessionId);
+      await mkdir(path.join(dir, "agents/main"), { recursive: true });
+      await writeFile(path.join(dir, "state.json"), JSON.stringify({
+        id: sessionId, version: 2, cwd: process.cwd(), createdAt: Date.now(),
+      }));
+      const argv = process.argv.slice(2);
+      const promptArg = argv.indexOf("-p");
+      const prompt = promptArg >= 0 ? argv[promptArg + 1] ?? "" : "";
+      const text = process.env.KIMI_PLUGIN_CC_MOCK_JOURNAL_PROMPT_OVERRIDE ?? prompt;
+      await writeFile(path.join(dir, "agents/main/wire.jsonl"), [
+        JSON.stringify({ type: "metadata", protocol_version: "1.5", created_at: Date.now() }),
+        JSON.stringify({ type: "turn.prompt", agentId: "main", input: [{ type: "text", text }], origin: { kind: "user" } }),
+        JSON.stringify({ type: "context.append_message", agentId: "main", message: { role: "user", content: [{ type: "text", text }] }, time: Date.now() }),
+      ].map((line) => `${line}\n`).join(""));
+    }
+  }
   const records = recordsForScenario(scenario);
   for (const record of records) {
     process.stdout.write(`${JSON.stringify(record)}\n`);
@@ -90,10 +113,11 @@ async function main(): Promise<void> {
 
   // Match kimi-code's stderr session announce so cli-client's regex
   // (extractSessionIdFromStderr) captures the id.
-  process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
+  if (!recoverableV2) process.stderr.write(`To resume this session: kimi -r ${sessionId}\n`);
   // Emit work and the resume hint before holding, to exercise budget capture.
   const postOutputDelay = Number(process.env.KIMI_PLUGIN_CC_MOCK_POST_OUTPUT_DELAY_MS ?? "0");
   if (postOutputDelay > 0) await sleep(postOutputDelay);
+  if (recoverableV2) process.stdout.write(`${JSON.stringify({ role: "meta", type: "session.resume_hint", session_id: sessionId, command: `kimi -r ${sessionId}`, content: `To resume this session: kimi -r ${sessionId}` })}\n`);
   process.exit(0);
 }
 
