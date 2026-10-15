@@ -6,10 +6,12 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-As of October 15, 2026, [2.2.0 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.2.0), published by
-the release-event run of `publish.yml` (run 38658918855) through GitHub Actions OIDC with a signed
-provenance statement (sigstore log index 3256863983) — the first release where the tag-triggered
-path worked end to end without a manual dispatch. 2.0.8 (same day, run 38650044033) was the first
+As of October 15, 2026, [2.2.1 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.2.1), published by
+the release-event run of `publish.yml` (run 38720071707) through GitHub Actions OIDC with a signed
+provenance statement (sigstore log index 3263398504; tarball shasum
+`03907c66d440155763a860ab52b5107c0233938b`, registry propagation took a few minutes this time).
+2.2.0 (same day, run 38658918855, log index 3256863983) was the first release where the tag-triggered
+path worked end to end without a manual dispatch; 2.0.8 (same day, run 38650044033) was the first
 OIDC publication; 2.0.7 (September 26) was the hand-published bootstrap.
 The first upload used the validated GitHub Actions artifact and interactive npm
 authentication. Its public tarball matched that artifact byte-for-byte, and a
