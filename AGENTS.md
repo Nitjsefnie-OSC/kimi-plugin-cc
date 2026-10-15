@@ -89,7 +89,7 @@ The companion runs via `scripts/companion.sh <subcommand>`, which resolves `node
 
 ## Post-GA roadmap
 
-See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for the pre-GA history and the living Post-GA audit log. v1.0.0 GA shipped 2026-05-26. Remaining open items: H1 enforcement (2.2.1 ships the read-only DETECTION slice; failing/stopping a run needs positive execution evidence — the parked upstream ask is an `outcome` field on print-mode tool records), filesystem-dependent write-label coverage, swarm subagent coverage. H5 is closed as a requested thinking-effort knob, not an enforced guarantee. H3/H4/H8/H9 closed in v1.2.x; H7 (real-binary smoke, `bun run smoke:real`) ships as a manual-dispatch CI workflow; model calls require `KIMI_MODEL_API_KEY`. Adding the secret does not enable per-push runs.
+See [ROADMAP-TO-GA.md](./ROADMAP-TO-GA.md) for the pre-GA history and the living Post-GA audit log. v1.0.0 GA shipped 2026-05-26. Remaining open items: H1 enforcement (2.2.1 ships the read-only DETECTION slice; failing/stopping a run needs positive execution evidence — filed upstream as MoonshotAI/kimi-code#4241, an `outcome` field on print-mode tool records), filesystem-dependent write-label coverage, swarm subagent coverage. H5 is closed as a requested thinking-effort knob, not an enforced guarantee. H3/H4/H8/H9 closed in v1.2.x; H7 (real-binary smoke, `bun run smoke:real`) ships as a manual-dispatch CI workflow; model calls require `KIMI_MODEL_API_KEY`. Adding the secret does not enable per-push runs.
 
 ## When editing
 
