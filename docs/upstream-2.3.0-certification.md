@@ -133,3 +133,19 @@ manual smoke workflow's recommended/default CLI version (2.3.0); runtime and
 package bytes are unchanged from that validation. CI validates the final commit
 before tagging; the release workflow validates the immutable tag before npm.
 No further paid calls were made, and no host installation or pin was changed.
+
+
+## Publication verification
+
+Plugin **2.2.2** was committed and pushed to `main` as `256e78f`, then tagged
+only after [CI passed](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755724024).
+[GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.2.2)
+triggered [successful OIDC publication](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755982507).
+The immutable-tag build again passed 1,104 tests with 28 opt-in skips and no
+failures, plus the 196-file package gate. npm provenance log index is
+`3383319298`; tarball SHA-1 is `31aa9752bf05dc4e9c818d5eef5f99e604968613`.
+The registry tarball matches the workflow artifact byte-for-byte; a fresh npm
+install passed isolated setup/check for Claude and Codex, with both runtime
+mirrors byte-identical to the release checkout. Registry/CDN propagation briefly
+returned 404s before that verification; no tag was moved and no publish retried.
+The unrelated Dependabot PR remains open. No host setup or CLI pin was changed.

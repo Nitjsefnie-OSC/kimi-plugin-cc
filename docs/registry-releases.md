@@ -6,6 +6,23 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
+As of October 22, 2026, plugin **2.2.2** certifies exact CLI **2.3.0**.
+[Release v2.2.2](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.2.2)
+is anchored at `256e78ff7cbf302fb19e8e523d8e3f943f7cb366`; its
+[CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755724024)
+and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755982507)
+passed. npm accepted the OIDC publication with signed provenance (sigstore log
+index `3383319298`) and tarball shasum
+`31aa9752bf05dc4e9c818d5eef5f99e604968613`. The registry tarball matches the
+validated Actions artifact byte-for-byte. A fresh npm install passed isolated
+setup/check for both hosts, and both runtime mirrors match the release checkout.
+Metadata and tarball availability propagated separately; the tarball endpoint
+briefly served a cached 404 (300-second TTL). No publication retry was needed.
+Publication does not update installed
+hosts, re-pin their hooks, or change the operator's CLI binary.
+
+### Previous publications
+
 As of October 15, 2026, [2.2.1 is live on npm](https://www.npmjs.com/package/kimi-plugin-cc/v/2.2.1), published by
 the release-event run of `publish.yml` (run 38720071707) through GitHub Actions OIDC with a signed
 provenance statement (sigstore log index 3263398504; tarball shasum
