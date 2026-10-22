@@ -1,8 +1,8 @@
 # Safety
 
-This guide describes the shipped 2.2.0 runtime. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
+This guide describes the current checkout runtime; 2.3.0 certification is unreleased. Read-only tasks deny file writes and shell commands. Rescue and pursue can edit your workspace. Write-swarm returns a patch from a temporary Git worktree.
 
-Native agent-core-v2 is certified at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, and `2.1.1`, with plan mode disabled. The [runtime certification table](../runtime/kimi-engine.ts) controls routing. The hook is not an operating-system sandbox.
+Native agent-core-v2 is certified at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, and `2.3.0`, with plan mode disabled. The [runtime certification table](../runtime/kimi-engine.ts) controls routing. The hook is not an operating-system sandbox.
 
 ## Why the safety story is hook-based
 
@@ -155,6 +155,8 @@ What the headline claim is: **every executed tool call in a plugin-managed sessi
 Provenance: a native-v2 plan requires the `system.version` marker as the first stream-json line and requires it to equal the probed version; a legacy plan still refuses that marker. Either mismatch tears down the owned process tree before any record reaches the caller (`CLI_ENGINE_PROVENANCE_MISMATCH`). Certification is per exact version and per operation. See the current version list at the start of this guide.
 
 Residuals, unchanged from v1 and stated plainly: `config.toml` and the session journals are trusted operator state (an actor who can write them could already delete the `[[hooks]]` entry); the upstream hook runner fails open on its own internal errors; the plan-path comparison does not realpath (a symlink there would need a prior hook-allowed write). Native plan mode, tower, subagent fork, Remote Control and `--add-dir` are out of scope.
+
+In CLI 2.3.0, stale-session retry can reread those same journals. Do not concurrently operate on or edit a plugin-managed session from another client. The upstream session lock is not a security boundary; no parent-side rescan can make that reload atomic.
 
 ## The rescue allowlist
 

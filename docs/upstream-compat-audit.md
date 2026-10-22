@@ -2,28 +2,30 @@
 
 How to verify a new kimi-code release against kimi-plugin-cc without breaking the safety guarantees we ship.
 
-Use this routine for every new exact native-v2 version, including patches. The 2.1.0/2.1.1 certification is the current worked example. Earlier audits remain useful historical evidence, but their legacy-v1 minor-version rules do not apply to native v2.
+Use this routine for every new exact native-v2 version, including patches. The 2.3.0 certification is the current worked example. Earlier audits remain useful historical evidence, but their legacy-v1 minor-version rules do not apply to native v2.
 
-## Current certified boundary (2026-10-14)
+## Current checkout certification boundary (2026-10-22)
 
 The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.42.0`,
-`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1` and `2.2.0`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
+`0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0` and `2.3.0`** (release commits `6954d2c8bf94a5c7fc29cc6ae35b15d042cc4dcb`,
 `ffa94fae854dedf594919acbea280d98cbe8e14e`, `75ac010bcb2050338444455de8328492d152c919`,
 `1b89e4b039f052d10f258464413b2047acca12ba`, `caf7d4e2fef06967280b325da06e44a4b0516eba`,
 `9d07f634be94ebeb1deba2f55d247807cf729315`,
 `52437299ff78de3d0aff7f38f054e5eb20c512e5`,
 `f67e6398fb3210ad8ace970e2dfd5bcc984ed61f`,
-`472192c34c1efad89a369870eff0da0b708ce9bb`)
+`472192c34c1efad89a369870eff0da0b708ce9bb`,
+`b5e28fd6beac752a2cdcc0ff2f5fdf40e6494fbb`)
 for all eight operations, and legacy-v1 through 0.41.x for an explicitly pinned binary.
-The most recent worked example is the 2026-10-14 exact 2.2.0 certification
-(plugin 2.0.8, carried unchanged into plugin 2.2.0; [certification evidence](upstream-2.2.0-certification.md)).
+The most recent worked example is the 2026-10-22 exact 2.3.0 certification
+([evidence](upstream-2.3.0-certification.md)); this checkout change is not yet
+a published plugin release. Published plugin 2.2.1 certifies through CLI 2.2.0.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 
 The certification basis is the **no-plan construction** (see
 [`native-v2-certification-provenance.md` §2](native-v2-certification-provenance.md#2-native-v2-entry-gate)),
 not an upstream ordering guarantee — plan still registers before external
-hooks at every certified version through 2.2.0 (confirmed in `dist/main.mjs` at 0.42.0 and by the
+hooks at every certified version through 2.3.0 (confirmed in `dist/main.mjs` at 0.42.0 and by the
 plan-ON live control on every certified binary). Certification is per EXACT
 version and per operation; a patch release is NOT certified until the three
 gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
@@ -43,6 +45,11 @@ gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
    (scope units, cascade engine, instantiation service) for changes to child
    scope creation or singleton-vs-scoped resolution — the swarm-subagent
    "own eager external-hooks service" claim rests on that subsystem.
+   Audit and pin in-process session reload routes too (2.3.0: print runner,
+   `sessionLookup.ts`, `sessionRunGateService.ts`). Distinguish a new model-reachable
+   plan-arming route from concurrent writes to the already-trusted operator
+   config/journals; the latter is the explicit provenance §2 residual, not a
+   newly proven in-boundary bypass. Do not treat upstream locks as enforcement.
 2. **Live control on the exact binary** (`repro-0391/repro.ts` = plan ON and
    `repro-0391/repro-clean.ts` = plan OFF, both under
    `.claude/kimi-code-research/upstream-v2-hook-coverage/`; isolated seeded home,
@@ -289,7 +296,7 @@ Verdicts to use (consistent across reports):
 
 ### Phase 1b — Real-binary smoke
 
-Run the exact candidate with the final implementation under review. Follow the [smoke instructions](ci.md) for isolated binary installation, authentication, and credential handling. Run controls and smoke sequentially. Authentication can use dedicated API credentials or an explicitly authorized temporary copy of subscription credentials; a previous successful run does not prove credentials are still valid.
+Run the exact candidate with the final implementation under review. Follow the [smoke instructions](ci.md) for isolated binary installation, authentication, and credential handling. Run controls and smoke sequentially. Authentication can use dedicated API credentials or explicitly authorized symlinks to subscription credential stores (never copies); a previous successful run does not prove credentials are still valid.
 
 For a version not yet in the production certification table, use the candidate mode:
 

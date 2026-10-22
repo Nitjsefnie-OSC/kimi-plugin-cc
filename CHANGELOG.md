@@ -2,6 +2,20 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.2.2 — 2026-10-22
+
+- Certify exact kimi-code 2.3.0 for all eight native-v2 operations after its
+  source scan, plan-ON/OFF controls and full candidate smoke; legacy support
+  remains capped at 0.41.x. See [evidence](docs/upstream-2.3.0-certification.md).
+
+- Preserve CLI 2.3.0's stdout-only occupied-session refusal as bounded structured
+  diagnostics, without treating it as prose, session lineage or an exit-status
+  override. Marker-first provenance checks are unchanged.
+- Audit and pin the new stale-session reload path. Concurrent edits to trusted
+  operator journals remain an explicit residual; no new hook bypass within the
+  existing trust boundary was demonstrated. Clarify the no-plan certification
+  gates and remove stale ordering-gate instructions.
+
 ## 2.2.1 — 2026-10-15
 
 - Request per-run thinking effort with `--thinking <effort>` through the upstream environment binding; persist requested effort and replay it in detached workers without changing saved defaults. The review gate requests `off` by default; provider/model no-op cases remain explicit.

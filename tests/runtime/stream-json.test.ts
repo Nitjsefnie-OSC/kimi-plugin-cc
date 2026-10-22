@@ -9,6 +9,24 @@ import {
 } from "../../runtime/stream-json.js";
 
 describe("StreamJsonParser", () => {
+  test("CLI errors stay out of prose and discard unneeded holder metadata", () => {
+    const error = { type: "error", code: "session.occupied", message: "Session is busy",
+      details: { sessionId: "not-a-resume-hint", holder: { token: "private-lock-token" } } };
+    expect(new StreamJsonParser().push(JSON.stringify(error) + "\n")).toEqual([
+      { cliError: { type: "error", code: "session.occupied", message: "Session is busy" } },
+    ]);
+    for (const invalid of [{ ...error, code: 4 }, { ...error, message: null },
+      { ...error, details: [] }, { ...error, code: "" }]) {
+      const [result] = new StreamJsonParser().push(JSON.stringify(invalid) + "\n");
+      expect(result?.cliError).toBeUndefined();
+      expect(result?.malformedReason).toBeDefined();
+    }
+    const [large] = new StreamJsonParser().push(JSON.stringify({ ...error,
+      code: "x".repeat(300), message: "x".repeat(5000) }) + "\n");
+    expect(large?.cliError?.code).toHaveLength(200);
+    expect(large?.cliError?.message).toHaveLength(4000);
+  });
+
   test("parses a single assistant content record", () => {
     const parser = new StreamJsonParser();
     const outcomes = parser.push('{"role":"assistant","content":"hello"}\n');

@@ -5,6 +5,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCliPrompt, runCliPromptWithBudget, ResponseTimeoutError, requireSessionId } from "../../runtime/cli-client.js";
+import { assertCliResultSuccess } from "../../runtime/commands/cli-helpers.js";
 import type { KimiExecutionPlan } from "../../runtime/kimi-engine.js";
 import {
   collectDescendantIdentities,
@@ -1199,6 +1200,38 @@ describe("native-v2 provenance", () => {
     delete env.KIMI_CODE_NO_AUTO_UPDATE;
     return { ...base, env, executionPlan: v2Plan(base.prefixArgs) };
   }
+
+  test("stdout-only occupied refusal is structured, not prose, and still requires provenance", async () => {
+    const root = await createTestPluginDataRoot("cli-v2-occupied");
+    const refusal = { type: "error", code: "session.occupied", message: "Session is in use",
+      details: { sessionId: "not-lineage", holder: { token: "private-token" } } };
+    try {
+      const seen: StreamJsonRecord[] = [];
+      const result = await runCliPrompt(v2Options(root, { cwd: root,
+        records: [V2_MARKER, refusal, { ...refusal, message: "second" }],
+        exitCode: 4, emitAnnounce: false, onRecord: (record) => seen.push(record) }));
+      expect(result.exitCode).toBe(4);
+      expect(result.cliError).toEqual({ type: "error", code: "session.occupied", message: "Session is in use" });
+      expect(result.malformed).toEqual([]);
+      expect(result.records).toEqual([]);
+      expect(seen).toEqual([]);
+      expect(result.sessionId).toBeUndefined();
+      try {
+        assertCliResultSuccess(result, "ask.runtime");
+        throw new Error("expected nonzero failure");
+      } catch (error) {
+        expect(error).toMatchObject({ code: "CLI_NONZERO_EXIT", details: {
+          exit_code: 4, cli_error: result.cliError } });
+        expect((error as Error).message).toContain("Session is in use");
+        expect(JSON.stringify(error)).not.toContain("private-token");
+      }
+      await expect(runCliPrompt(v2Options(root, { cwd: root,
+        records: [refusal, V2_MARKER], exitCode: 4, emitAnnounce: false })))
+        .rejects.toMatchObject({ code: "CLI_ENGINE_PROVENANCE_MISMATCH" });
+    } finally {
+      await cleanupTestPath(root);
+    }
+  });
 
   test("accepts a leading system.version marker that matches the certified version", async () => {
     const root = await createTestPluginDataRoot("cli-v2-marker-ok");

@@ -126,6 +126,7 @@ export async function runCliPrompt(opts) {
     let stderrTail = "";
     let announcedSessionId;
     let announcedGoalSummary;
+    let announcedCliError;
     let announcedSystemVersion;
     const hookMonitor = createHookEscapeMonitor({ commandLabel: opts.commandLabel,
         operationKind: opts.executionPlan.operationKind, trustedWorkspaceRoot: opts.trustedWorkspaceRoot, cwd: opts.cwd });
@@ -190,6 +191,13 @@ export async function runCliPrompt(opts) {
         for (const outcome of outcomes) {
             if (engineMismatchDetected)
                 return;
+            if (outcome.cliError !== undefined) {
+                if (requireMarkerBeforeOutput("a CLI error record"))
+                    return;
+                announcedCliError ??= outcome.cliError;
+                appendLogLine({ event: "cli_error", ...outcome.cliError });
+                continue;
+            }
             if (outcome.unknownRecord !== undefined) {
                 // H3 forward-compat: a stream-json line with a role we don't model
                 // (a future kimi-code role). Log it for diagnostics but keep it OUT of
@@ -609,6 +617,7 @@ export async function runCliPrompt(opts) {
                 settledAt: 0, // Filled at settlement, after the teardown barrier.
                 sessionId,
                 goalSummary: announcedGoalSummary,
+                cliError: announcedCliError,
                 systemVersion: announcedSystemVersion,
                 observedEngine: announcedSystemVersion !== undefined
                     ? "native-v2"

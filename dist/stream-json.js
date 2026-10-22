@@ -12,6 +12,8 @@
 //   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
 //   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; modeled since v1.8.5 (SystemVersionRecord), filtered like other meta
 //
+//   {"type":"error","code":"session.occupied","message":"...","details":{...}} // 2.3.0; stdout-only refusal, exit 4
+//
 // Notes on what does and does not appear here:
 //   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
 //     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
@@ -262,6 +264,20 @@ function parseLine(line) {
     // `role`, so it's surfaced on the dedicated goalSummary outcome channel.
     if (role === undefined && parsed["type"] === "goal.summary") {
         return validateGoalSummary(parsed, line);
+    }
+    if (role === undefined && parsed["type"] === "error") {
+        if (typeof parsed["code"] !== "string" || parsed["code"].length === 0 ||
+            typeof parsed["message"] !== "string" || parsed["message"].length === 0 ||
+            (parsed["details"] !== undefined && !isRecord(parsed["details"]))) {
+            return { malformedLine: line, malformedReason: "error record field has unexpected type" };
+        }
+        // Keep bounded diagnostic fields only; holder metadata is not needed and
+        // must not become a session-id source or be copied into persisted errors.
+        return { cliError: {
+                type: "error",
+                code: parsed["code"].slice(0, 200),
+                message: parsed["message"].slice(0, 4000),
+            } };
     }
     // H3 forward-compat: a non-empty string role we don't model (a role a future
     // kimi-code adds). Surface it out-of-band on the unknownRecord channel —

@@ -21,7 +21,7 @@ The trusted publisher is configured for `linxule/kimi-plugin-cc`, workflow
 `publish.yml`, environment `npm`, with direct publishing allowed.
 `NPM_TRUSTED_PUBLISHING=true` is enabled in GitHub Actions. Future GitHub releases
 use short-lived OIDC credentials, without a stored npm token or interactive 2FA.
-The first npm OIDC publication will be the next release; do not republish 2.0.7.
+OIDC publication is established; never republish an existing version.
 
 **2026-10-15 status.** The `v2.0.8` release triggered the first OIDC attempt. It
 failed twice on the publish step for reasons unrelated to the package: current

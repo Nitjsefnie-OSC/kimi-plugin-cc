@@ -116,7 +116,7 @@ export function assertCliResultSuccess(result: CliClientResult, stage: string): 
   }
 
   if (result.exitCode !== 0) {
-    const tail = result.stderrTail.trim();
+    const tail = result.cliError?.message ?? result.stderrTail.trim();
     throw new RuntimeError(
       "CLI_NONZERO_EXIT",
       [
@@ -131,6 +131,7 @@ export function assertCliResultSuccess(result: CliClientResult, stage: string): 
           signal: result.signal,
           record_count: result.records.length,
           malformed_count: result.malformed.length,
+          ...(result.cliError !== undefined && { cli_error: result.cliError }),
           stderr_tail_len: result.stderrTail.length,
         },
       },

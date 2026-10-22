@@ -1,9 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
 **Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields)
-**Current release capability (2.0.6):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0` and `2.1.1` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Current capability (plugin 2.2.2):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0` and `2.3.0` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
+
+Plugin 2.2.2 adds CLI 2.3.0 certification; publication does not update installed hosts. Exact 2.3.0 evidence: [certification record](upstream-2.3.0-certification.md).
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is
@@ -74,7 +76,13 @@ allow. Certification is per exact version (not per minor) and per operation.
 Residual assumptions, accepted explicitly: (i) `<KIMI_CODE_HOME>/config.toml`
 and the session journals are trusted operator state — an actor who can write
 them could already delete the `[[hooks]]` entry, so the check-to-use window
-adds no new trust class; (ii) the upstream hook runner fails open on its own
+adds no new trust class. In 2.3.0, print mode can close/resume and retry once
+on `session.stale`, replaying the same wire journals. This is another read of
+trusted state, not an additional plan-state source. Do not concurrently edit
+or operate on a plugin-managed session from another client; the parent cannot
+atomically revalidate in-process reloads. Upstream session locks are not a
+security boundary (publication errors fail open, and stale detection compares
+file lengths); (ii) the upstream hook runner fails open on its own
 internal errors (unchanged from v1); (iii) `writesOnlyPlanFile` compares
 normalized strings without realpath — a symlink at the plan path would need a
 prior hook-allowed write, which the construction denies; (iv) repository Git
@@ -90,21 +98,25 @@ remedy.
 
 ## 3. Certification gate for one operation
 
-After the upstream ordering gate is released, each operation may enter the
-native-v2 capability matrix only after all of these pass against the exact
-candidate binary:
+Under the current Basis B no-plan construction, each operation may enter the
+native-v2 capability matrix only after these gates pass against the exact
+candidate. Basis A would require separate ordering proofs before changing the
+safety profile:
 
 1. **Scoped source audit** using `docs/upstream-compat-audit.md`: prompt mode,
    permission ordering, hook runner/payload/aggregation, stream records and
    session bootstrap/config.
-2. **Pre-spawn plan:** exact command tuple and exact version resolve; the version
-   is inside a reviewed minor; the requested operation is present in the
-   engine-specific capability matrix.
-3. **Hook-order lifecycle proofs:** both a fresh
-   `default_plan_mode=true` session and a separately restored plan-state session
-   attempt the exact plan-file `Write`/`Edit`; the managed external hook runs
-   and its deny wins. A green test whose plan precondition did not hold is not
-   evidence.
+2. **Mechanized tag scan and pre-spawn plan:** audit and pin the exact source
+   bytes, including reload paths; verify the exact binary tuple and first-line
+   version marker. Before certification, use only the explicit candidate smoke
+   seam, not a production capability row or a wider minor-version range.
+3. **Non-vacuous no-plan controls:** with plan mode ON, the exact plan-file
+   Write must still bypass the deny hook, proving the refusal is load-bearing.
+   With plan mode OFF, separate ordinary Write and EnterPlanMode attempts must
+   reach the deny hook. The plugin refuses default-plan config and plan-tainted
+   resume journals before spawn. A green test without its precondition is not
+   evidence. If the ON bypass disappears, re-audit the upstream ordering fix
+   instead of silently keeping the old certification basis.
 4. **Operation smoke:** a temp-installed exact binary runs the real operation
    through `KIMI_PLUGIN_CC_KIMI_BIN` and `bun run smoke:real`. Read-only,
    write-confinement, cancellation, budgets, concurrency, session-id capture,
@@ -116,13 +128,14 @@ candidate binary:
    suite, and drift gate are green.
 
 Only then may that single operation/version pair be added to the native-v2
-matrix. The shipped certification table controls engine selection. Adding a version expands production routing and therefore requires the completed gates and an authorized release.
+matrix. The certification table controls routing in that checkout; shipping the
+expanded production capability requires a separately authorized release.
 
 ## 4. Current capability matrix
 
 | Engine | Operation | Production state |
 |---|---|---|
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1` (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |
 

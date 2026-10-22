@@ -99,7 +99,7 @@ export function assertCliResultSuccess(result, stage) {
         });
     }
     if (result.exitCode !== 0) {
-        const tail = result.stderrTail.trim();
+        const tail = result.cliError?.message ?? result.stderrTail.trim();
         throw new RuntimeError("CLI_NONZERO_EXIT", [
             `kimi subprocess exited with code ${result.exitCode}`,
             result.signal ? ` (signal ${result.signal})` : "",
@@ -110,6 +110,7 @@ export function assertCliResultSuccess(result, stage) {
                 signal: result.signal,
                 record_count: result.records.length,
                 malformed_count: result.malformed.length,
+                ...(result.cliError !== undefined && { cli_error: result.cliError }),
                 stderr_tail_len: result.stderrTail.length,
             },
         });
