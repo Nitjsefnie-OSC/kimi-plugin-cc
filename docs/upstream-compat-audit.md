@@ -18,8 +18,7 @@ The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.4
 `684bae9ea6a437f3bae98bba1dcb797a917d500b`)
 for all eight operations, and legacy-v1 through 0.41.x for an explicitly pinned binary.
 The most recent worked example is the 2026-10-23 exact 2.3.1 certification
-([evidence](upstream-2.3.1-certification.md)); this checkout change is not yet
-a published plugin release. Published plugin 2.2.2 certifies through CLI 2.3.0.
+([evidence](upstream-2.3.1-certification.md)). Published plugin 2.3.1 certifies through CLI 2.3.1.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 
@@ -83,10 +82,7 @@ gates below pass and its version is appended to `NATIVE_V2_CERTIFIED`.
    Review and represent a new major's hook schema first. Only after all gates
    pass may the shipped certification table gain the version.
 
-Plugin versions advance independently using ordinary SemVer. A compatible
-certification update takes the next unused plugin patch and states the exact CLI
-version separately; never reuse a published plugin version or tag. Version labels
-do not replace any certification gate.
+Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. A compatible certification update takes the next unused plugin patch unless that alignment is intentional; state the exact CLI version separately and never reuse a published plugin version or tag. Version labels do not replace any certification gate.
 
 Do not extend `KIMI_TESTED_MINORS` (legacy table) past 0.41. Do not write a
 "plan-file write denied under plan mode" smoke — under the construction that
