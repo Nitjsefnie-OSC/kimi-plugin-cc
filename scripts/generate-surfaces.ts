@@ -8,6 +8,7 @@ import { pathToFileURL } from "node:url";
 import {
   CLAUDE_SURFACE_HASHES,
   CODEX_MARKETPLACE,
+  CODEX_MCP_CONFIG,
   CODEX_PLUGIN_MANIFEST,
   CODEX_PLUGIN_SUBDIR,
   CODEX_SKILLS,
@@ -61,6 +62,10 @@ export function generatedCodexSurfaceFiles(): GeneratedFile[] {
       // Codex plugin manifest lives INSIDE the self-contained subfolder root.
       path: `${CODEX_PLUGIN_SUBDIR}/.codex-plugin/plugin.json`,
       content: `${JSON.stringify(CODEX_PLUGIN_MANIFEST, null, 2)}\n`,
+    },
+    {
+      path: `${CODEX_PLUGIN_SUBDIR}/.mcp.json`,
+      content: `${JSON.stringify(CODEX_MCP_CONFIG, null, 2)}\n`,
     },
     {
       // The repo-scope Codex marketplace stays at the repo root and POINTS INTO
@@ -173,11 +178,22 @@ export async function checkRuntimeMirror(repoRoot: string): Promise<SurfaceCheck
   return { ok: messages.length === 0, messages };
 }
 
-// Orphan detection for generated TEXT surfaces under the subfolder (catches a
-// renamed/removed skill leaving a stale SKILL.md behind).
+// Orphan detection for generated TEXT surfaces under the subfolder, including
+// root-level launch configs and renamed/removed skills.
 export async function checkGeneratedTextOrphans(repoRoot: string): Promise<SurfaceCheckResult> {
   const expected = new Set(generatedCodexSurfaceFiles().map((file) => file.path));
   const messages: string[] = [];
+
+  const rootEntries = await readdir(path.join(repoRoot, CODEX_PLUGIN_SUBDIR), {
+    withFileTypes: true,
+  }).catch(() => []);
+  for (const entry of rootEntries) {
+    if (!entry.isFile()) continue;
+    const rel = `${CODEX_PLUGIN_SUBDIR}/${entry.name}`;
+    if (!expected.has(rel)) {
+      messages.push(`${rel}: orphaned generated file (run \`bun run generate:surfaces\`)`);
+    }
+  }
 
   for (const sub of [".codex-plugin", "skills"]) {
     const files = await listFilesRecursive(repoRoot, path.join(CODEX_PLUGIN_SUBDIR, sub));

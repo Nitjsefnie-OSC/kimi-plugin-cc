@@ -6,6 +6,7 @@ import { markJobCancelled, sweepStaleJobs } from "../jobs.js";
 import { JobStore, withJobStore } from "../job-store.js";
 import { ensurePluginPaths, resolvePluginPaths } from "../paths.js";
 import { parseJobLookupArgs } from "../parsing.js";
+import { revalidateProcessIdentities, type ProcessIdentity } from "../process-tree.js";
 import { getManagedCommandConfig } from "./registry.js";
 import type { CommandContext } from "../types.js";
 
@@ -41,6 +42,15 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
         null,
         2,
       )}\n`;
+    }
+
+    if (store.getMcpTask(job.job_id) &&
+      (context.mcpCompanionIdentity === undefined || context.mcpKimiIdentity === undefined)) {
+      throw new RuntimeError(
+        "MCP_CANCEL_REQUIRES_BINDING",
+        `MCP job ${job.job_id} requires MCP job-control cancellation with recorded identities; use tasks/cancel or kimi_job_cancel.`,
+        "mcp.cancel",
+      );
     }
 
     if (job.pid === null && job.kimi_pid === null) {
@@ -80,6 +90,7 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
         preMarkError = error;
       }
 
+      await assertMcpCompanionIdentity(job, context.mcpCompanionIdentity);
       signalJobProcesses(job, "SIGTERM");
       await sleep(1_000);
       if (hasLiveRecordedProcess(job)) {
@@ -101,6 +112,8 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       )}\n`;
     }
 
+    await assertMcpCompanionIdentity(job, context.mcpCompanionIdentity);
+    await assertMcpKimiIdentity(job, context.mcpKimiIdentity);
     signalJobProcesses(job, "SIGTERM");
 
     const cancelled = await waitForCancellation(paths, job.job_id);
@@ -116,7 +129,11 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
       )}\n`;
     }
 
-    signalJobProcesses(job, "SIGKILL");
+    const companionMatches = await assertMcpCompanionIdentity(job, context.mcpCompanionIdentity, true);
+    const kimiMatches = await assertMcpKimiIdentity(job, context.mcpKimiIdentity, true);
+    if (companionMatches || kimiMatches) {
+      signalJobProcesses(job, "SIGKILL", { companion: companionMatches, kimi: kimiMatches });
+    }
 
     await withJobStore(paths, async (forcedStore) => {
       const current = forcedStore.getJob(job.job_id);
@@ -146,13 +163,71 @@ export async function runCancel(argv: string[], context: CommandContext): Promis
   }
 }
 
+async function assertMcpCompanionIdentity(
+  job: { pid: number | null },
+  expected: ProcessIdentity | null | undefined,
+  allowMissing = false,
+): Promise<boolean> {
+  return assertMcpProcessIdentity(job.pid, expected, "companion", allowMissing);
+}
+
+async function assertMcpKimiIdentity(
+  job: { kimi_pid: number | null },
+  expected: ProcessIdentity | null | undefined,
+  allowMissing = false,
+): Promise<boolean> {
+  return assertMcpProcessIdentity(job.kimi_pid, expected, "Kimi", allowMissing);
+}
+
+async function assertMcpProcessIdentity(
+  actualPid: number | null,
+  expected: ProcessIdentity | null | undefined,
+  label: string,
+  allowMissing: boolean,
+): Promise<boolean> {
+  if (expected === undefined) return true;
+  if (expected === null) {
+    if (actualPid === null) return false;
+    throw new RuntimeError(
+      "CANCEL_NOT_SUPPORTED",
+      `MCP job ${actualPid} has no verified ${label} identity; refusing PID-only cancellation.`,
+      "mcp.cancel",
+    );
+  }
+  if (actualPid !== expected.pid) {
+    throw new RuntimeError(
+      "MCP_PROCESS_IDENTITY_MISMATCH",
+      `The recorded ${label} process identity no longer matches; no signal was sent.`,
+      "mcp.cancel",
+    );
+  }
+  const validation = await revalidateProcessIdentities([expected]);
+  if (!validation.complete) {
+    throw new RuntimeError(
+      "MCP_PROCESS_IDENTITY_UNAVAILABLE",
+      `The ${label} identity probe was inconclusive; no further signal was sent and the job was not changed.`,
+      "mcp.cancel",
+    );
+  }
+  const matches = validation.identities.length > 0;
+  if (!matches && !allowMissing) {
+    throw new RuntimeError(
+      "MCP_PROCESS_IDENTITY_MISMATCH",
+      `The recorded ${label} process identity no longer matches; no signal was sent.`,
+      "mcp.cancel",
+    );
+  }
+  return matches;
+}
+
 function signalJobProcesses(
   job: { pid: number | null; kimi_pid: number | null },
   signal: NodeJS.Signals,
+  include: { companion: boolean; kimi: boolean } = { companion: true, kimi: true },
 ): void {
   const pids = new Set<number>();
-  if (job.pid !== null) pids.add(job.pid);
-  if (job.kimi_pid !== null) pids.add(job.kimi_pid);
+  if (include.companion && job.pid !== null) pids.add(job.pid);
+  if (include.kimi && job.kimi_pid !== null) pids.add(job.kimi_pid);
 
   for (const pid of pids) {
     try {

@@ -18,7 +18,7 @@ The plugin certifies **native agent-core-v2 at exact `@moonshot-ai/kimi-code@0.4
 `684bae9ea6a437f3bae98bba1dcb797a917d500b`)
 for all eight operations, and legacy-v1 through 0.41.x for an explicitly pinned binary.
 The most recent worked example is the 2026-10-23 exact 2.3.1 certification
-([evidence](upstream-2.3.1-certification.md)). Published plugin 2.3.1 certifies through CLI 2.3.1.
+([evidence](upstream-2.3.1-certification.md)). Plugin 2.4.0 preserves that certification through CLI 2.3.1.
 0.42.0 removed `packages/agent-core` and `KIMI_CODE_LEGACY_FLAG` (#3542; not in
 its changelog): `kimi -p` is v2 unconditionally, so the v1 pin is inert there.
 

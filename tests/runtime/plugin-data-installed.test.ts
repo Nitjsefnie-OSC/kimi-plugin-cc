@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 
@@ -26,7 +26,7 @@ describe("installed data-root isolation", () => {
       const aliasedData = path.join(alias, "plugins/data", dataName);
       await mkdir(install, { recursive: true });
       for (const dir of ["dist", "scripts"]) {
-        await cp(path.join(repo, host === "codex" ? "plugins/kimi-codex" : "", dir), path.join(install, dir), { recursive: true });
+        expect(spawnSync("cp", ["-R", path.join(repo, host === "codex" ? "plugins/kimi-codex" : "", dir), path.join(install, dir)]).status).toBe(0);
       }
       const manifest = host === "codex" ? ".codex-plugin" : ".claude-plugin";
       await mkdir(path.join(install, manifest));
@@ -55,7 +55,7 @@ describe("installed data-root isolation", () => {
       const custom = path.join(scratch, `${host}-custom-data`);
       await mkdir(install, { recursive: true });
       for (const dir of ["dist", "scripts"]) {
-        await cp(path.join(repo, host === "codex" ? "plugins/kimi-codex" : "", dir), path.join(install, dir), { recursive: true });
+        expect(spawnSync("cp", ["-R", path.join(repo, host === "codex" ? "plugins/kimi-codex" : "", dir), path.join(install, dir)]).status).toBe(0);
       }
       const manifest = host === "codex" ? ".codex-plugin" : ".claude-plugin";
       await mkdir(path.join(install, manifest));

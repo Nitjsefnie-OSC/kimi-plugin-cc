@@ -132,6 +132,8 @@ export interface CliClientOptions {
    * never propagate to the kimi subprocess.
    */
   onRecord?: (record: StreamJsonRecord) => void;
+  /** Called with the real child PID before stream processing; failures trigger owned teardown. */
+  onSpawn?: (pid: number) => void | Promise<void>;
   /**
    * Milliseconds between SIGTERM and SIGKILL escalation after an abort.
    * Larger values delay SIGKILL; only `Infinity` suppresses escalation entirely.
@@ -497,7 +499,7 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     command_label: opts.commandLabel ?? null,
   });
 
-  return await new Promise<CliClientResult>((resolve, reject) => {
+  return await new Promise<CliClientResult>(async (resolve, reject) => {
     let aborted = false;
     type TeardownOutcome = { ok: true } | { ok: false; error: unknown };
     let cancellationTeardown: Promise<TeardownOutcome> | undefined;
@@ -771,6 +773,24 @@ export async function runCliPrompt(opts: CliClientOptions): Promise<CliClientRes
     // the spawned child cannot escape cancellation teardown.
     if (opts.signal?.aborted === true) {
       onAbort();
+    }
+
+    if (child.pid !== undefined && opts.onSpawn) {
+      try {
+        await opts.onSpawn(child.pid);
+      } catch (error) {
+        onAbort();
+        settle(
+          "reject",
+          new RuntimeError(
+            "CLI_SPAWN_CALLBACK_FAILED",
+            `Failed to record the spawned kimi process: ${formatError(error)}`,
+            "cli-client.spawn",
+            error instanceof Error ? { cause: error, details: errorDetails() } : { details: errorDetails() },
+          ),
+        );
+        return;
+      }
     }
 
     earlyErrorHandled = true;

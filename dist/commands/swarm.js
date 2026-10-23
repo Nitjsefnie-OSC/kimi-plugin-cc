@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
@@ -180,7 +180,7 @@ async function runReadSwarm(parsed, objective, context) {
             env: context.env,
         });
         const prompt = buildSwarmPrompt(objective, parsed.cap);
-        const jobId = randomUUID();
+        const jobId = allocateJobId(context);
         const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
         const job = store.createJob({
             job_id: jobId,
@@ -257,7 +257,7 @@ async function runWriteSwarm(parsed, objective, context) {
             context.stderr.write("[kimi-plugin-cc] /kimi:swarm --write bases its worktree on HEAD — your uncommitted changes are NOT visible to the swarm. Commit or stash them first if the swarm needs them.\n");
         }
         const prompt = buildSwarmWritePrompt(objective, parsed.cap);
-        const jobId = randomUUID();
+        const jobId = allocateJobId(context);
         const logPath = path.join(paths.logsDir, `swarm-write-${jobId}.jsonl`);
         // Namespace worktrees per repo so the cross-repo sweep below only ever
         // touches THIS repo's subtree (the worktreesDir is a single global dir shared
@@ -493,6 +493,7 @@ writeMode) {
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             logPath: job.stream_log_path,
+            onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,
         }, budgetMs, "swarm.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));

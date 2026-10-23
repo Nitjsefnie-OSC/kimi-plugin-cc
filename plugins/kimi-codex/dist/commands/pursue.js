@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { runCliPromptWithBudget } from "../cli-client.js";
@@ -122,7 +122,7 @@ export async function runPursue(argv, context) {
             env: context.env,
         });
         const prompt = buildGoalPrompt(objective, parsed.turns);
-        const jobId = randomUUID();
+        const jobId = allocateJobId(context);
         const logPath = path.join(paths.logsDir, `pursue-${jobId}.jsonl`);
         const job = store.createJob({
             job_id: jobId,
@@ -226,6 +226,7 @@ async function executePursueJob(jobId, prompt, objective, budgetMs, context) {
             model: job.model ?? undefined,
             thinkingEffort: job.thinking_effort ?? undefined,
             logPath: job.stream_log_path,
+            onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,
         }, budgetMs, "pursue.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));

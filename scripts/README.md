@@ -4,10 +4,10 @@ The shell entry points run the compiled Node runtime while preserving the caller
 
 | File | Purpose |
 | --- | --- |
-| `companion.sh` | Launch `dist/companion.js` for commands and skills |
+| `companion.sh` | Launch `dist/companion.js` for commands, skills, and the MCP stdio server |
 | `review-gate-hook.sh` | Launch the optional Claude Code Stop hook |
-| `surface-registry.ts` | Define Codex text surfaces and lock Claude surface hashes |
-| `generate-surfaces.ts` | Generate Codex manifests, skills, scripts, and the runtime mirror |
+| `surface-registry.ts` | Define Codex skills and MCP configuration, and lock Claude surface hashes |
+| `generate-surfaces.ts` | Generate Codex manifests, MCP launch config, skills, scripts, and the runtime mirror |
 | `smoke-rescue-drift.sh` | Run an opt-in live rescue check after CLI changes |
 | `audit-subscription-routing.ts` | Offline, exact-source counterexamples to atomic regional routing in CLI 2.0.1 |
 | `audit-subscription-recovery.ts` | Offline, exact-source evidence that terminal quota/recovery metadata is unavailable |

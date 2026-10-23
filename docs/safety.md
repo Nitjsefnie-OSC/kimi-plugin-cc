@@ -229,6 +229,20 @@ If another installed host still points to an older hook, that hook may veto thes
 - **Field-proven by a real-binary smoke.** `tests/runtime/real-binary-smoke.test.ts` runs the real `runSwarm --write` and asserts the POSITIVE end-to-end (a `coder` subagent's edits land in the worktree, captured as a patch; the user's real tree is byte-identical + git-clean; the worktree is cleaned up) plus the NEGATIVE (an absolute-path write outside the trusted root is hook-denied). It is the check that catches `tool_input` field-name drift — `Write`/`Edit` carry `path`, not `file_path`, and reading the wrong key denies every real write silently.
 - **Model-invocable agent (v1.5), patch-only by construction.** Following the field-proof above, `--write` now has a `kimi-swarm-write` subagent so the main thread can dispatch a write fan-out on its own judgement — the same human-command + model-invocable-agent split the rest of the suite uses. Auto-dispatch is a safe extension here because it widens **no** write surface and removes **no** bound: the agent path runs the identical `runSwarm --write` code, so edits still land only in the throwaway worktree, the managed hook still gates every `coder` subagent, the patch is still handed back for the user to apply (**the plugin never applies or commits**), and `--budget` + default `--max-concurrency` 1 + the hook requirement all still hold. In fact write-swarm is a *less* dangerous agent than the `kimi-pursue` agent already shipped: pursue writes directly into the workspace, whereas write-swarm's output is a patch the human reviews before anything reaches a real tree. Because it is still a write surface, the agent description demands BOTH signals — many disjoint write targets AND explicit fan-out intent — and steers single edits to `kimi-rescue`, read-only fan-outs to `kimi-swarm`, and autonomous loops to `kimi-pursue`. Default `--max-concurrency` stays **1**; raising it (concurrent writers) remains a deliberate, human-or-explicitly-requested choice.
 
+## MCP transport and long-running jobs
+
+The plugin also bundles an MCP stdio server for Claude Code and Codex. This is an additive transport, not a second execution engine or a way around the managed hook. The seven model tools run the same certified companion operations, exact-version checks, native-v2 preflight, workspace allowlists, finite budgets, and artifact rendering as the slash commands and skills. The review gate remains a separate Stop-hook feature.
+
+Claude Code task-capable calls return durable MCP task IDs and use `tasks/get` and `tasks/cancel`. Codex currently consumes ordinary MCP tool results, not this task extension: after attachment, model tools return a job handle when the job is still running or its terminal result when already settled. `kimi_job_status`, `kimi_job_result`, and `kimi_job_cancel` provide polling and cancellation. Do not describe the Codex path as native MCP tasks.
+
+Claude supplies its project directory as the default workspace. A configured host workspace is a containment boundary: an explicit workspace must be that directory or a descendant, not an arbitrary override. Codex calls normally supply an absolute `workspace` on the initial operation because its packaged stdio server runs from the plugin root; that explicit path is the operation's trust choice. Subsequent job control can use the persisted binding. Job controls manage only MCP-launched jobs, require the same canonical workspace and repository, and cannot inspect or cancel an arbitrary CLI job by ID.
+
+Attachment waits for the operation to install cancellation handlers, with a 60-second bound. Verified teardown can close a stalled launch; missing identity or inconclusive termination evidence keeps it starting and recoverable by ID. `kimi_pid` is recorded at actual spawn rather than inferred from a later process-list match.
+
+The MCP task/job ID is preassigned and bound to the job's real `operation_kind`, not merely its lineage. `mcp_tasks` stores launch and ownership metadata; the normal `jobs` table remains the outcome authority. Failed jobs, including budget timeouts, produce completed tasks with `isError:true` and the failed-job artifact, so partial output is not mistaken for a final answer. Supervisor and protocol failures are distinct from ordinary Kimi failures.
+
+Closing an MCP connection does not cancel work. A later server reopens the same store and resumes status/result handling by ID. Generic stale sweeps skip MCP-owned rows, and direct CLI cancellation refuses them; use MCP job controls for those jobs. Companion and observed Kimi-descendant identities include start tokens and process groups; MCP cancellation and stale cleanup revalidate them rather than signalling a recycled PID. Cancellation remains cooperative and does not roll back edits. Pursue teardown and write-swarm patch capture still run through the existing companion path; write-swarm captures its patch on every terminal path before removing the worktree.
+
 ## Response budgets and partial output (2.2.0)
 
 Every single-turn command runs under a wall-clock budget: ask, review and
@@ -265,9 +279,9 @@ at it (the runtime resolves that path instead of `kimi` on `PATH`; every spawn
 still exports `KIMI_CODE_NO_AUTO_UPDATE=1`, so the pinned copy never drifts).
 
 ```sh
-PIN=~/.local/share/kimi-plugin-cc/kimi-bin/2.2.0
+PIN=~/.local/share/kimi-plugin-cc/kimi-bin/2.3.1
 mkdir -p "$PIN" && cd "$PIN" && printf '{"name":"kimi-plugin-cc-pin","private":true}\n' > package.json
-bun add @moonshot-ai/kimi-code@2.2.0
+bun add @moonshot-ai/kimi-code@2.3.1
 export KIMI_PLUGIN_CC_KIMI_BIN="$PIN/node_modules/.bin/kimi"   # e.g. in ~/.zshenv
 ```
 

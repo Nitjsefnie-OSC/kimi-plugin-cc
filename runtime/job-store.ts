@@ -94,6 +94,39 @@ export interface CreateJobInput {
   error: JobError | null;
 }
 
+export type McpLaunchState = "starting" | "attached" | "exited";
+
+export interface McpTaskRecord {
+  task_id: string;
+  operation_kind: KimiOperationKind;
+  repo_id: string;
+  workspace_cwd: string;
+  companion_pid: number | null;
+  companion_identity: string | null;
+  kimi_identity: string | null;
+  stdout_path: string;
+  stderr_path: string;
+  launch_state: McpLaunchState;
+  launch_error: string | null;
+  created_at: string;
+  attached_at: string | null;
+  updated_at: string;
+}
+
+export interface CreateMcpTaskInput {
+  task_id: string;
+  operation_kind: KimiOperationKind;
+  repo_id: string;
+  workspace_cwd: string;
+  stdout_path: string;
+  stderr_path: string;
+}
+
+export type McpTaskPatch = Partial<Pick<
+  McpTaskRecord,
+  "companion_pid" | "companion_identity" | "kimi_identity" | "launch_state" | "launch_error" | "attached_at"
+>>;
+
 export interface FindLatestJobOptions {
   repoId: string;
   commandType?: ManagedCommandType;
@@ -211,6 +244,25 @@ export class JobStore {
     }
 
     this.db.exec(`
+      CREATE TABLE IF NOT EXISTS mcp_tasks (
+        task_id TEXT PRIMARY KEY,
+        operation_kind TEXT NOT NULL,
+        repo_id TEXT NOT NULL,
+        workspace_cwd TEXT NOT NULL,
+        companion_pid INTEGER,
+        companion_identity TEXT,
+        kimi_identity TEXT,
+        stdout_path TEXT NOT NULL,
+        stderr_path TEXT NOT NULL,
+        launch_state TEXT NOT NULL,
+        launch_error TEXT,
+        created_at TEXT NOT NULL,
+        attached_at TEXT,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE INDEX IF NOT EXISTS mcp_tasks_workspace_updated_idx
+        ON mcp_tasks (workspace_cwd, updated_at DESC);
 
       CREATE INDEX IF NOT EXISTS jobs_repo_updated_idx
         ON jobs (repo_id, updated_at DESC);
@@ -262,6 +314,9 @@ export class JobStore {
       -- 0.1.6 migration: rename adversarial_review to challenge
       UPDATE jobs SET command_type = 'challenge' WHERE command_type = 'adversarial_review';
     `);
+    if (!mcpTableHasColumn(this.db, "kimi_identity")) {
+      this.db.exec("ALTER TABLE mcp_tasks ADD COLUMN kimi_identity TEXT;");
+    }
     } catch (error) {
       // Migration failed — close the adapter so the OS handle is released
       // before propagating. Wrap close() in its own try so a double-fault
@@ -409,6 +464,41 @@ export class JobStore {
     );
 
     return row ? hydrateRow(row) : null;
+  }
+
+  createMcpTask(input: CreateMcpTaskInput): McpTaskRecord {
+    const now = new Date().toISOString();
+    try {
+      this.db.run(`
+        INSERT INTO mcp_tasks (
+          task_id, operation_kind, repo_id, workspace_cwd, companion_pid, companion_identity, kimi_identity,
+          stdout_path, stderr_path, launch_state, launch_error, created_at, attached_at, updated_at
+        ) VALUES (
+          @task_id, @operation_kind, @repo_id, @workspace_cwd, NULL, NULL, NULL,
+          @stdout_path, @stderr_path, 'starting', NULL, @created_at, NULL, @updated_at
+        )
+      `, { ...input, created_at: now, updated_at: now });
+    } catch (error) {
+      throw translateSqliteError(error);
+    }
+    return this.getMcpTask(input.task_id)!;
+  }
+
+  getMcpTask(taskId: string): McpTaskRecord | null {
+    return this.db.get<McpTaskRecord>("SELECT * FROM mcp_tasks WHERE task_id = ?", taskId) ?? null;
+  }
+
+  updateMcpTask(taskId: string, patch: McpTaskPatch): McpTaskRecord | null {
+    const updates = ["updated_at = @updated_at"];
+    const params: Record<string, unknown> = { task_id: taskId, updated_at: new Date().toISOString() };
+    for (const key of ["companion_pid", "companion_identity", "kimi_identity", "launch_state", "launch_error", "attached_at"] as const) {
+      const value = patch[key];
+      if (value === undefined) continue;
+      updates.push(`${key} = @${key}`);
+      params[key] = value;
+    }
+    this.db.run(`UPDATE mcp_tasks SET ${updates.join(", ")} WHERE task_id = @task_id`, params);
+    return this.getMcpTask(taskId);
   }
 
   updateRunningJob(jobId: string, patch: Partial<JobRecord>): JobRecord | null {
@@ -790,6 +880,10 @@ function rewriteNamedBindingsForBun(bindings: Record<string, unknown>): Record<s
 function tableHasColumn(db: SqliteAdapter, columnName: string): boolean {
   const columns = db.all<{ name: string }>(`PRAGMA table_info(jobs)`);
   return columns.some((column) => column.name === columnName);
+}
+
+function mcpTableHasColumn(db: SqliteAdapter, columnName: string): boolean {
+  return db.all<{ name: string }>("PRAGMA table_info(mcp_tasks)").some((column) => column.name === columnName);
 }
 
 function isSqliteConstraintError(error: unknown): boolean {

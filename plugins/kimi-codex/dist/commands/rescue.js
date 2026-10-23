@@ -1,5 +1,5 @@
 import { companionHelp } from "../help.js";
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import path from "node:path";
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
 import { runCliPromptWithBudget } from "../cli-client.js";
@@ -61,7 +61,7 @@ export async function runRescue(argv, context) {
             resumeSessionId: sessionResolution.kimiSessionId ?? undefined,
             resumeSource: sessionResolution.sourceJob,
         });
-        const jobId = randomUUID();
+        const jobId = allocateJobId(context);
         const logPath = path.join(paths.logsDir, `rescue-${jobId}.jsonl`);
         const job = store.createJob({
             job_id: jobId,
@@ -192,6 +192,7 @@ export async function executeRescueJob(jobId, prompt, context, options) {
             thinkingEffort: job.thinking_effort ?? undefined,
             resumeSessionId: job.kimi_session_id ?? undefined,
             logPath: job.stream_log_path,
+            onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             signal: handlers.signal,
         }, job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS, "rescue.prompt");
         store.updateRunningJob(job.job_id, observedExecutionFields(result));

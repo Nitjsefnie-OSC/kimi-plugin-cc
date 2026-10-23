@@ -23,6 +23,14 @@ The check rebuilds the runtime, checks generated surfaces, typechecks, runs test
 
 Claude commands, agents, and plugin manifests have locked hashes in `scripts/surface-registry.ts`. Update the affected hashes after editing those files, then regenerate surfaces.
 
+## Keep MCP transport behavior explicit
+
+Keep Claude's per-request MCP task negotiation separate from Codex's ordinary launch/polling results; never infer task support from the server, a previous call, or a host name alone. New operations must use typed schemas and the existing companion dispatch, fixed task/job identity, `operation_kind`, exact workspace binding, and hook/preflight checks. Do not add a raw argv escape hatch or run model jobs inside the MCP server process.
+
+Never overwrite a saved process identity during attachment. After an inconclusive identity or post-signal probe, keep the launch starting and recoverable by its public job ID; terminalize only on settled evidence. Reconcile a genuinely dead starting companion after the stale grace instead of leaving it in a permanent mismatch loop. Generic stale sweeps skip MCP-owned rows, and direct CLI cancellation refuses them; only MCP-bound controls may signal their recorded processes.
+
+Run `bun test tests/runtime/mcp-*.test.ts` for transport changes. Cover compiled stdio framing, reconnects, terminal-result mapping, process identity, and both host distributions. `bun run check:package` must prove modern discovery and legacy initialization from the packed plugin.
+
 ## Keep code comments useful
 
 Write comments only for current, non-obvious constraints, upstream quirks, and safety boundaries. Do not add cutover narratives, PR or reviewer attributions, release history, or narration that merely restates code and tests. Update or delete stale comments in the same change that makes them stale. Put release history in `CHANGELOG.md` or `ROADMAP-TO-GA.md`, and exact-version certification evidence in `docs/upstream-*-certification.md`.

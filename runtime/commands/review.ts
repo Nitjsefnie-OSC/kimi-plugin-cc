@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import path from "node:path";
 import process from "node:process";
 
@@ -63,7 +63,7 @@ export async function runReview(
   });
   const store = new JobStore(paths);
 
-  const jobId = randomUUID();
+  const jobId = allocateJobId(context);
   // Leave kimi_session_id NULL until kimi announces an actual ID; never invent
   // one that no on-disk session matches.
   const reviewSessionId: string | null = null;
@@ -101,6 +101,7 @@ export async function runReview(
   const reviewConfig = getManagedCommandConfig(commandType);
   const cancel = reviewConfig.cancellation;
   const handlers = createCliCancellationHandlers();
+  store.updateRunningJob(job.job_id, { phase: "turn-running" });
 
   try {
     const result = await runCliPromptWithBudget(
@@ -115,6 +116,7 @@ export async function runReview(
         model: parsed.model,
         thinkingEffort: parsed.thinkingEffort,
         logPath,
+        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
         signal: handlers.signal,
       },
       job.budget_ms ?? KIMI_REVIEW_PROMPT_TIMEOUT_MS,

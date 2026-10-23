@@ -40,7 +40,7 @@ You need:
 - macOS or Linux
 - Claude Code or Codex with plugin support
 - Node.js 22.5 or newer
-- Kimi Code CLI 2.3.1 (2.3.0 also certified), the recommended version for plugin 2.3.1
+- Kimi Code CLI 2.3.1 (2.3.0 also certified), the recommended version for plugin 2.4.0
 
 Windows is not currently supported. Check your versions in a terminal:
 
@@ -108,7 +108,7 @@ needed to use the package. Kimi Code CLI and Node are still prerequisites.
 For an explicitly versioned local Claude Code plugin:
 
 ```sh
-npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.3.1
+npm install --prefix ~/.local/share/kimi-plugin-cc kimi-plugin-cc@2.4.0
 claude --plugin-dir ~/.local/share/kimi-plugin-cc/node_modules/kimi-plugin-cc
 ```
 
@@ -180,6 +180,19 @@ Canceling a task does not undo changes it has already made.
 
 Ask and rescue support resuming a session. For example, `/kimi:ask -r Explain the next step.` continues your latest ask session. In Codex, ask `$kimi-ask` to resume it. See the [ask options](./commands/ask.md) and [rescue options](./commands/rescue.md).
 
+### Use the MCP server
+
+The plugin also bundles one MCP stdio server for Claude Code and Codex, alongside the existing slash commands and skills. Those interfaces remain available, and the existing safety-hook setup is still mandatory.
+
+The seven model tools are `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm`, and `kimi_swarm_write`. Job control uses `kimi_job_status`, `kimi_job_result`, and `kimi_job_cancel`.
+
+- **Claude Code:** task-capable calls return durable MCP tasks. Poll them with `tasks/get` and cancel them with `tasks/cancel`.
+- **Codex:** calls currently use ordinary MCP results, not native MCP tasks. After attachment, a running job returns a launch handle; an already settled job returns its terminal result. Use the three job-control tools to check, read, or cancel it.
+
+Claude supplies the project directory as the default workspace. When the host has no default, as is normal for Codex, the initial operation requires an absolute `workspace` path. Later job-control calls can rely on the job's persisted workspace binding. An MCP server disconnect does not cancel jobs. The jobs table owns status and outcomes; the terminal artifact is the result authority. Failed jobs return `isError: true` with their artifacts.
+
+For example: “Use `kimi_review` to check this diff. In Claude Code, poll the returned task with `tasks/get`; in Codex, use the returned handle with `kimi_job_status` and then `kimi_job_result`.”
+
 ## Update or remove the plugin
 
 ### Update in Claude Code
@@ -249,7 +262,7 @@ Contributors need Bun to run `bun run check`. The detailed engineering documents
 - macOS 或 Linux
 - 支持插件的 Claude Code 或 Codex
 - Node.js 22.5 或更高版本
-- Kimi Code CLI 2.3.1（2.3.0 亦已认证），这是插件 2.3.1 的推荐版本
+- Kimi Code CLI 2.3.1（2.3.0 亦已认证），这是插件 2.4.0 的推荐版本
 
 目前不支持 Windows。在终端检查版本：
 
@@ -364,6 +377,19 @@ Claude Code 还提供可选的[自动审查功能](./commands/setup.md)，在 Cl
 
 Ask 和 rescue 支持恢复会话。例如，`/kimi:ask -r 解释下一步。` 会继续最近一次 ask 会话。在 Codex 中，请 `$kimi-ask` 恢复该会话。参见 [ask 参数](./commands/ask.md)和 [rescue 参数](./commands/rescue.md)。
 
+### 使用 MCP 服务器
+
+插件现在还内置了一个同时供 Claude Code 和 Codex 使用的 MCP stdio 服务器，与现有斜杠命令和技能并存。这些界面仍然可用，现有的安全钩子配置也仍是必需步骤。
+
+七个模型工具是 `kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm` 和 `kimi_swarm_write`。任务控制使用 `kimi_job_status`、`kimi_job_result` 和 `kimi_job_cancel`。
+
+- **Claude Code：** 支持任务式调用的工具会返回持久 MCP 任务，通过 `tasks/get` 轮询，通过 `tasks/cancel` 取消。
+- **Codex：** 目前使用普通 MCP 结果，而不是原生 MCP 任务。附加完成后，仍在运行的任务返回启动句柄；已结束的任务直接返回最终结果。使用上述三个任务控制工具查看进度、读取结果或取消任务。
+
+Claude 默认提供项目目录作为工作区。如果宿主没有默认工作区（Codex 通常如此），首次操作必须提供绝对的 `workspace` 路径。之后的任务控制调用可以使用为该任务保存的工作区绑定关系。MCP 服务器断开连接不会取消任务。`jobs` 表是任务状态与结局的依据，最终产物（artifact）是结果内容的依据。任务失败时会返回 `isError: true` 以及相应产物。
+
+例如：“使用 `kimi_review` 检查这次差异。在 Claude Code 中，用 `tasks/get` 轮询返回的任务；在 Codex 中，用返回的句柄调用 `kimi_job_status`，然后调用 `kimi_job_result`。”
+
 ## 更新或移除插件
 
 ### 在 Claude Code 中更新
@@ -433,7 +459,7 @@ Il vous faut :
 - macOS ou Linux
 - une version de Claude Code ou de Codex prenant en charge les plugins
 - Node.js 22.5 ou une version ultérieure
-- Kimi Code CLI 2.3.1 (2.3.0 également certifiée), la version recommandée pour le plugin 2.3.1
+- Kimi Code CLI 2.3.1 (2.3.0 également certifiée), la version recommandée pour le plugin 2.4.0
 
 Windows n'est pas pris en charge actuellement. Vérifiez les versions dans un terminal :
 
@@ -548,6 +574,19 @@ Annuler une tâche n'annule pas les modifications déjà effectuées.
 
 Ask et rescue permettent de reprendre une session. Par exemple, `/kimi:ask -r Explique l'étape suivante.` reprend votre dernière session ask. Dans Codex, demandez à `$kimi-ask` de la reprendre. Consultez les [options d'ask](./commands/ask.md) et les [options de rescue](./commands/rescue.md).
 
+### Utiliser le serveur MCP
+
+Le plugin intègre aussi un serveur MCP stdio unique pour Claude Code et Codex, en plus des commandes slash et skills existants. Ces interfaces restent disponibles et la configuration du hook de sécurité reste obligatoire.
+
+Les sept outils de modèle sont `kimi_ask`, `kimi_review`, `kimi_challenge`, `kimi_rescue`, `kimi_pursue`, `kimi_swarm` et `kimi_swarm_write`. Le contrôle des tâches utilise `kimi_job_status`, `kimi_job_result` et `kimi_job_cancel`.
+
+- **Claude Code :** les appels compatibles avec les tâches renvoient des tâches MCP durables. Interrogez-les avec `tasks/get` et annulez-les avec `tasks/cancel`.
+- **Codex :** les appels utilisent actuellement des résultats MCP ordinaires, et non des tâches MCP natives. Après l'attachement, un job encore actif renvoie un handle de lancement ; un job déjà terminé renvoie directement son résultat final. Utilisez les trois outils de contrôle pour suivre, lire ou annuler le job.
+
+Claude fournit le répertoire du projet comme espace de travail par défaut. Sans espace de travail par défaut côté hôte, ce qui est normal pour Codex, l'opération initiale exige un chemin `workspace` absolu. Les contrôles ultérieurs peuvent utiliser l'association enregistrée entre la tâche et l'espace de travail. Une déconnexion du serveur MCP n'annule pas les tâches. La table jobs fait autorité pour l'état et l'issue des jobs ; l'artefact final fait autorité pour le contenu du résultat. Une tâche en échec renvoie `isError: true` avec ses artefacts.
+
+Par exemple : « Utilise `kimi_review` pour vérifier ce diff. Dans Claude Code, interroge la tâche renvoyée avec `tasks/get` ; dans Codex, utilise le handle renvoyé avec `kimi_job_status`, puis `kimi_job_result`. »
+
 ## Mettre à jour ou supprimer le plugin
 
 ### Mettre à jour dans Claude Code
@@ -617,7 +656,7 @@ Les contributeurs ont besoin de Bun pour exécuter `bun run check`. La documenta
 - macOS または Linux
 - プラグインに対応した Claude Code または Codex
 - Node.js 22.5 以降
-- Kimi Code CLI 2.3.1（2.3.0 も認証済み。プラグイン 2.3.1 の推奨バージョン）
+- Kimi Code CLI 2.3.1（2.3.0 も認証済み。プラグイン 2.4.0 の推奨バージョン）
 
 現在、Windows には対応していません。ターミナルでバージョンを確認します。
 
@@ -731,6 +770,19 @@ Codex では「$kimi-review を使い、設定済みの『……』というモ�
 タスクをキャンセルしても、すでに行われた変更は元に戻りません。
 
 Ask と rescue はセッションの再開に対応しています。たとえば `/kimi:ask -r 次の手順を説明してください。` は、直近の ask セッションを続けます。Codex では `$kimi-ask` に再開を依頼してください。[ask のオプション](./commands/ask.md)と [rescue のオプション](./commands/rescue.md)を参照できます。
+
+### MCP サーバーを使う
+
+プラグインには、既存のスラッシュコマンドとスキルに加え、Claude Code と Codex の両方で使える MCP stdio サーバーが 1 つ同梱されています。既存のコマンドとスキルも引き続き使え、既存の安全フックの設定も必須です。
+
+7 つのモデルツールは `kimi_ask`、`kimi_review`、`kimi_challenge`、`kimi_rescue`、`kimi_pursue`、`kimi_swarm`、`kimi_swarm_write` です。ジョブ制御には `kimi_job_status`、`kimi_job_result`、`kimi_job_cancel` を使います。
+
+- **Claude Code：** タスク対応の呼び出しは永続的な MCP タスクを返します。`tasks/get` でポーリングし、`tasks/cancel` でキャンセルします。
+- **Codex：** 現在はネイティブの MCP タスクではなく、通常の MCP 結果を使います。アタッチ後、実行中のジョブには起動ハンドルを返し、すでに終了したジョブには最終結果を直接返します。進捗確認・結果取得・キャンセルには 3 つのジョブ制御ツールを使います。
+
+Claude はプロジェクトディレクトリをデフォルトのワークスペースとして提供します。ホスト側にデフォルトがない場合（Codex ではこれが通常です）、最初の操作では絶対パスの `workspace` が必要です。後続のジョブ制御では、そのジョブに保存されたワークスペースの関連付けを利用できます。MCP サーバーとの接続が切れても、ジョブはキャンセルされません。`jobs` テーブルがジョブの状態と結果を管理し、最終成果物（artifact）が結果内容の正規の情報源となります。失敗したジョブも成果物とともに `isError: true` を返します。
+
+例：「`kimi_review` でこの差分を確認してください。Claude Code では返されたタスクを `tasks/get` でポーリングし、Codex では返されたハンドルを使って `kimi_job_status`、`kimi_job_result` の順に呼び出してください。」
 
 ## プラグインを更新または削除する
 

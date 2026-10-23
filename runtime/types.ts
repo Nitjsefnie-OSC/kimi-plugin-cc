@@ -6,7 +6,8 @@ export type CompanionCommand =
   | "status"
   | "result"
   | "cancel"
-  | "replay";
+  | "replay"
+  | "mcp";
 
 export type RuntimeCommandType =
   | "setup"
@@ -53,4 +54,7 @@ export interface CommandContext {
   env: NodeJS.ProcessEnv;
   stdout: NodeJS.WriteStream;
   stderr: NodeJS.WriteStream;
+  mcpJobId?: string;
+  mcpCompanionIdentity?: import("./process-tree.js").ProcessIdentity | null;
+  mcpKimiIdentity?: import("./process-tree.js").ProcessIdentity | null;
 }

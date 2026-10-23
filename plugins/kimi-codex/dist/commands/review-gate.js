@@ -166,10 +166,7 @@ async function executeReviewGate(payload, assistantMessage, context) {
         try {
             const activeStore = store;
             // runCliPromptWithBudget ties the 8 s timeout to an AbortController
-            // that kills the kimi child on expiry — review_gate runs inside
-            // Claude Code's Stop hook, so a runaway kimi after timeout would
-            // hold model tokens with no way for /kimi:cancel to reach it
-            // (the SQLite row's kimi_pid is null). See reports/17 and 18.
+            // that kills the kimi child on expiry and records its PID at spawn.
             const result = await runCliPromptWithBudget({
                 cwd: payload.cwd,
                 env: context.env,
@@ -182,6 +179,7 @@ async function executeReviewGate(payload, assistantMessage, context) {
                 // Requested via env; provider/model may ignore it. The 8s budget still applies.
                 thinkingEffort,
                 logPath,
+                onSpawn: (pid) => { activeStore.updateRunningJob(job.job_id, { kimi_pid: pid }); },
             }, KIMI_REVIEW_GATE_TIMEOUT_MS, "review_gate.runtime");
             activeStore.updateRunningJob(job.job_id, observedExecutionFields(result));
             assertCliResultSuccess(result, "review_gate.runtime");

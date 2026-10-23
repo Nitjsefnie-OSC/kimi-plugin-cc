@@ -1,6 +1,6 @@
 # Compatibility and upgrades
 
-For plugin 2.3.1, use Kimi Code CLI 2.3.1. The plugin certifies exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, and `2.3.1` for all eight operations. It does not automatically accept later patches or minor releases. The npm distribution adds an installation channel; it does not change this compatibility table.
+For plugin 2.4.0, use Kimi Code CLI 2.3.1. The plugin certifies exact native-v2 versions `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, and `2.3.1` for all eight operations. It does not automatically accept later patches or minor releases. The npm distribution adds an installation channel; it does not change this compatibility table.
 
 Explicitly pinned legacy-v1 binaries remain supported within `KIMI_TESTED_MINORS`, through 0.41.x, subject to each operation's minimum version. The [runtime table](../runtime/kimi-engine.ts) is the authority.
 
@@ -8,7 +8,7 @@ Use the [README installation and update steps](../README.md) for Claude Code or 
 
 ## Plugin versions and upgrades
 
-Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.3.1 certifies CLI 2.3.1; the runtime table records that mapping. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
+Plugin versions advance independently using ordinary SemVer and may deliberately align with a certified CLI release. Plugin 2.4.0 certifies CLI 2.3.1; the runtime table records that mapping. Published versions and tags are never reused. Every upstream patch requires its own certification. The native-v2 no-plan profile, plugin/marketplace IDs and existing job store are preserved.
 
 After updating the plugin, run Claude Code `/kimi:setup` or Codex `$kimi-setup`
 from that host's active install to re-pin its version-stamped hook path, then

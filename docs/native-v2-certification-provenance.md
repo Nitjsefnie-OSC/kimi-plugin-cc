@@ -1,11 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
 **Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields)
-**Current capability (plugin 2.3.1):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` and `2.3.1` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Current capability (plugin 2.4.0):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` and `2.3.1` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
-Plugin 2.3.1 adds CLI 2.3.1 certification; publication does not update installed hosts. Exact 2.3.1 evidence: [certification record](upstream-2.3.1-certification.md).
+Plugin 2.3.1 added CLI 2.3.1 certification; plugin 2.4.0 preserves it while adding MCP transport. Publication does not update installed hosts. Exact 2.3.1 evidence: [certification record](upstream-2.3.1-certification.md).
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is

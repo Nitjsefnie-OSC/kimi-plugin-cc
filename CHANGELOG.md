@@ -2,6 +2,16 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.4.0 — 2026-10-24
+
+- Add one dependency-free MCP stdio server for Claude Code and Codex, with typed schemas for seven model operations plus job status, result, and cancellation. The existing slash commands, skills, safety hooks, and review gate remain intact.
+- Return native MCP task handles for Claude calls that negotiate the tasks extension per request. Codex receives ordinary launch handles and uses explicit job-control tools; this does not claim native task-extension support for Codex.
+- Supervise each operation through a fixed task/job UUID, bounded attachment, durable reconnects, and PID/PGID/start-token identity checks. Preserve recoverable launches and their public IDs after inconclusive probes, reconcile stale dead companions, and keep cancellation from signalling a changed identity.
+- Preserve exact CLI 2.3.1 certification, workspace containment, data-root isolation, hook verification, resume lineage, and trusted write roots. Terminal jobs retain their artifact semantics: failed jobs complete tasks with `isError:true`, and cancelled jobs map to `cancelled`.
+- Document the transport, lifecycle, ownership, safety, comment-hygiene, and contributor rules. Align package and marketplace descriptions and keywords with the MCP surface.
+
+Contributors: **Kimi** (design, implementation, documentation, and verification), **Claude** and **Codex** (adversarial review and re-review).
+
 ## 2.3.1 — 2026-10-23
 
 - Certify exact kimi-code 2.3.1 for all eight native-v2 operations after the source scan, plan-ON/OFF controls and full 15-test candidate smoke. Preserve the no-plan construction and document the new session-lock, internal-`ps`/PATH and legacy-trust-migration residuals. See [evidence](docs/upstream-2.3.1-certification.md).

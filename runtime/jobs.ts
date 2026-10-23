@@ -46,6 +46,8 @@ export async function markJobFailed(
   summary = "Job failed.",
   options?: { phase?: string | null; partialOutput?: PartialJobOutput },
 ): Promise<JobRecord> {
+  const current = store.getJob(job.job_id) ?? job;
+  if (current.status !== "running") return current;
   if (options?.partialOutput) {
     const label = job.command_type[0].toUpperCase() + job.command_type.slice(1);
     summary = `${label} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
@@ -82,6 +84,8 @@ export async function markJobCancelled(
   error?: unknown,
   options?: { phase?: string | null },
 ): Promise<JobRecord> {
+  const current = store.getJob(job.job_id) ?? job;
+  if (current.status !== "running") return current;
   const normalized = error ? normalizeJobError(error) : null;
   const phase = options?.phase;
   const artifactJob = {
@@ -108,6 +112,7 @@ export async function markJobCancelled(
 
 export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promise<void> {
   for (const job of store.listRunningJobsWithProcessHints()) {
+    if (store.getMcpTask(job.job_id)) continue;
     if (!isStaleEnoughToSweep(job)) {
       continue;
     }
@@ -169,7 +174,7 @@ export async function sweepStaleJobs(store: JobStore, paths: PluginPaths): Promi
   }
 }
 
-const STALE_SWEEP_GRACE_MS = 15_000;
+export const STALE_SWEEP_GRACE_MS = 15_000;
 
 function isStaleEnoughToSweep(job: JobRecord): boolean {
   const updatedAt = Date.parse(job.updated_at);

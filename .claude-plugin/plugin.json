@@ -1,7 +1,7 @@
 {
   "name": "kimi",
-  "description": "Kimi for Claude Code: ask, review, challenge, rescue, pursue, and swarm through the local Kimi Code CLI, with per-command PreToolUse safety hooks and an optional Stop-hook review gate.",
-  "version": "2.3.1",
+  "description": "Kimi for Claude Code: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP tasks through the local Kimi Code CLI, with PreToolUse safety hooks.",
+  "version": "2.4.0",
   "homepage": "https://github.com/linxule/kimi-plugin-cc",
   "repository": "https://github.com/linxule/kimi-plugin-cc",
   "license": "Apache-2.0",
@@ -11,7 +11,9 @@
     "review",
     "code-review",
     "delegation",
-    "multi-model"
+    "multi-model",
+    "mcp",
+    "model-context-protocol"
   ],
   "author": {
     "name": "linxule"

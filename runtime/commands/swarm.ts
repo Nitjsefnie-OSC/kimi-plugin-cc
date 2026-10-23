@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import { mkdir, readdir, stat, writeFile } from "node:fs/promises";
 import path from "node:path";
 
@@ -224,7 +224,7 @@ async function runReadSwarm(
     });
 
     const prompt = buildSwarmPrompt(objective, parsed.cap);
-    const jobId = randomUUID();
+    const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-${jobId}.jsonl`);
 
     const job = store.createJob({
@@ -327,7 +327,7 @@ async function runWriteSwarm(
     }
 
     const prompt = buildSwarmWritePrompt(objective, parsed.cap);
-    const jobId = randomUUID();
+    const jobId = allocateJobId(context);
     const logPath = path.join(paths.logsDir, `swarm-write-${jobId}.jsonl`);
 
     // Namespace worktrees per repo so the cross-repo sweep below only ever
@@ -613,6 +613,7 @@ async function executeSwarmJob(
         model: job.model ?? undefined,
         thinkingEffort: job.thinking_effort ?? undefined,
         logPath: job.stream_log_path,
+        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
         signal: handlers.signal,
       },
       budgetMs,

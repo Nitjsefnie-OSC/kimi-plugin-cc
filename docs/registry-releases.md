@@ -78,8 +78,9 @@ bun run check:package .tmp/npm
 
 The package check inspects the actual tarball, verifies runtime copies and
 vendored licenses, and installs/checks the safety hook in isolated homes for
-both hosts. It also exercises unsupported-version refusal using a fake CLI.
-It does not invoke a model or read the maintainer's Kimi configuration.
+both hosts. It also exercises unsupported-version refusal using a fake CLI and
+modern MCP discovery plus legacy initialization on both extracted compiled
+distributions. It does not invoke a model or read the maintainer's Kimi configuration.
 
 ## First publication (completed bootstrap reference)
 
@@ -119,8 +120,5 @@ release. `.github/workflows/publish.yml` runs on `release.published`; it checks
 the tag against `package.json`, runs the full gate and package smoke, then
 publishes the validated tarball through OIDC with provenance. The publish job
 has no source checkout or build scripts. A manual dispatch with an existing
-release tag is available for a first OIDC release or recovery after a verified
-publication failure. Check npm before retrying; released versions are immutable.
-
-A locally bootstrapped first version is already published: do not dispatch it
-again. The next release is the first OIDC publication.
+release tag is available for recovery after a verified publication failure.
+Check npm before retrying; released versions are immutable.

@@ -1,20 +1,17 @@
 import { companionHelp } from "./help.js";
-import { runAsk } from "./commands/ask.js";
 import { runModelInventory } from "./commands/models.js";
 import { runCancel } from "./commands/cancel.js";
-import { notImplementedCompanionCommand } from "./commands/not-implemented.js";
 import { runReplay } from "./commands/replay.js";
 import { runRepairSessions } from "./commands/repair-sessions.js";
 import { runResult } from "./commands/result.js";
-import { runReview } from "./commands/review.js";
-import { runRescue } from "./commands/rescue.js";
-import { runPursue } from "./commands/pursue.js";
-import { runSwarm } from "./commands/swarm.js";
 import { renderSetupResult, runSetup } from "./commands/setup.js";
 import { runStatus } from "./commands/status.js";
 import { runWorker } from "./commands/worker.js";
 import { formatError, RuntimeError } from "./errors.js";
 import { resolveKimiHome } from "./kimi-home.js";
+import { runModelCommand } from "./model-command.js";
+import { runMcpChild } from "./mcp/supervised-child.js";
+import { runMcpServer } from "./mcp/server.js";
 import type { CommandContext } from "./types.js";
 
 async function main(argv: string[]): Promise<void> {
@@ -29,11 +26,17 @@ async function main(argv: string[]): Promise<void> {
     cwd,
     env: {
       ...process.env,
-      KIMI_CODE_HOME: resolveKimiHome(process.env, cwd),
+      KIMI_CODE_HOME: command === "mcp" ? process.env.KIMI_CODE_HOME : resolveKimiHome(process.env, cwd),
     },
     stdout: process.stdout,
     stderr: process.stderr,
   };
+
+  const modelResult = await runModelCommand(argv, context);
+  if (modelResult !== undefined) {
+    context.stdout.write(modelResult);
+    return;
+  }
 
   switch (command) {
     case "setup": {
@@ -60,45 +63,12 @@ async function main(argv: string[]): Promise<void> {
       }
       return;
     }
-    case "review": {
-      const result = await runReview(rest, context, "review");
-      context.stdout.write(`${result}\n`);
+    case "mcp":
+      await runMcpServer(context);
       return;
-    }
-    case "task": {
-      const [taskType, ...taskArgs] = rest;
-      if (taskType === "rescue") {
-        const result = await runRescue(taskArgs, context);
-        context.stdout.write(result);
-        return;
-      }
-
-      if (taskType === "challenge") {
-        const result = await runReview(taskArgs, context, "challenge");
-        context.stdout.write(`${result}\n`);
-        return;
-      }
-
-      if (taskType === "pursue") {
-        const result = await runPursue(taskArgs, context);
-        context.stdout.write(result);
-        return;
-      }
-
-      if (taskType === "swarm") {
-        const result = await runSwarm(taskArgs, context);
-        context.stdout.write(result);
-        return;
-      }
-
-      notImplementedCompanionCommand(taskType ? `task ${taskType}` : "task");
+    case "mcp-child":
+      context.stdout.write(await runMcpChild(rest, context));
       return;
-    }
-    case "ask": {
-      const result = await runAsk(rest, context);
-      context.stdout.write(`${result}\n`);
-      return;
-    }
     case "status":
       context.stdout.write(await runStatus(rest, context));
       return;

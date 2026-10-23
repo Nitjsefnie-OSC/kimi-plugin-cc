@@ -34,8 +34,9 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "3f62177191206562e5531c180b0e7767089bf79087ae7ffac4add618b8fc83a7" },
-  { path: ".claude-plugin/marketplace.json", sha256: "0ebf1b7d3d3411569bd2f2b7c7e75fe0e4fbf47de375d5f9431592542d2f6868" },
+  { path: ".claude-plugin/plugin.json", sha256: "af51dd61df3f20cbe426d53cb6a9910b1a05d1aa34a4b498e4b95c688770f336" },
+  { path: ".claude-plugin/marketplace.json", sha256: "8ff587f45a009e07a689441f85c483d3264227d1809f6594418c5c1d60303f09" },
+  { path: ".mcp.json", sha256: "a48d8f07eed5d99bafba5b11a0fdb681ab4960b59c53ea68c7c04e350f618ded" },
   { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
   { path: "commands/cancel.md", sha256: "4d1c1e9d0534fac113fea18e2c8993d99f3ada1335186f66cd995a45f1057db4" },
@@ -57,24 +58,52 @@ export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
   { path: "agents/kimi-swarm.md", sha256: "0a9306c344cc8eac1d504a213c0096884a41203c8a310e4c516986b79de23165" },
 ];
 
+export const CODEX_MCP_CONFIG = {
+  mcpServers: {
+    kimi: {
+      type: "stdio",
+      command: "./scripts/companion.sh",
+      args: ["mcp"],
+      cwd: ".",
+      env_vars: [
+        "KIMI_PLUGIN_CC_DATA",
+        "CLAUDE_PLUGIN_DATA",
+        "PLUGIN_DATA",
+        "KIMI_CODE_HOME",
+        "KIMI_PLUGIN_CC_KIMI_BIN",
+        "KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS",
+        "KIMI_PLUGIN_CC_NODE_BIN",
+        "KIMI_PLUGIN_CC_HOOK_SCRIPT",
+        "KIMI_PLUGIN_CC_HOST_ID",
+        "KIMI_MODEL_NAME",
+        "KIMI_MODEL_API_KEY",
+        "KIMI_MODEL_PROVIDER_TYPE",
+        "KIMI_MODEL_BASE_URL",
+        "KIMI_MODEL_THINKING_EFFORT",
+      ],
+    },
+  },
+} as const;
+
 export const CODEX_PLUGIN_MANIFEST = {
   name: PLUGIN_NAME,
   version: PLUGIN_VERSION,
   description:
-    "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, and parallel tasks through the local Kimi Code CLI.",
+    "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP job controls through the local Kimi Code CLI.",
   author: {
     name: "linxule",
   },
   homepage: "https://github.com/linxule/kimi-plugin-cc",
   repository: "https://github.com/linxule/kimi-plugin-cc",
   license: "Apache-2.0",
-  keywords: ["kimi", "kimi-code", "review", "code-review", "delegation", "multi-model"],
+  keywords: ["kimi", "kimi-code", "review", "code-review", "delegation", "multi-model", "mcp", "model-context-protocol"],
   skills: "./skills/",
+  mcpServers: "./.mcp.json",
   interface: {
     displayName: "Kimi",
     shortDescription: "Ask, review, and build with Kimi",
     longDescription:
-      "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime; no MCP server is required.",
+      "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime, with MCP tools provided by the bundled server.",
     developerName: "linxule",
     category: "Developer Tools",
     capabilities: ["Code Review", "Local Shell", "Write"],

@@ -1,7 +1,7 @@
 {
   "name": "kimi",
-  "version": "2.3.1",
-  "description": "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, and parallel tasks through the local Kimi Code CLI.",
+  "version": "2.4.0",
+  "description": "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, parallel tasks, and MCP job controls through the local Kimi Code CLI.",
   "author": {
     "name": "linxule"
   },
@@ -14,13 +14,16 @@
     "review",
     "code-review",
     "delegation",
-    "multi-model"
+    "multi-model",
+    "mcp",
+    "model-context-protocol"
   ],
   "skills": "./skills/",
+  "mcpServers": "./.mcp.json",
   "interface": {
     "displayName": "Kimi",
     "shortDescription": "Ask, review, and build with Kimi",
-    "longDescription": "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime; no MCP server is required.",
+    "longDescription": "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime, with MCP tools provided by the bundled server.",
     "developerName": "linxule",
     "category": "Developer Tools",
     "capabilities": [

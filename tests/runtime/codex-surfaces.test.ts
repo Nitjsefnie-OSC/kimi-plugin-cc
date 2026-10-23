@@ -57,7 +57,7 @@ describe("Codex sidecar surfaces", () => {
     expect(result.ok).toBe(true);
   });
 
-  test("Codex plugin manifest is shell-only and skill-backed", async () => {
+  test("Codex plugin manifest declares shell skills and the MCP launch config", async () => {
     const manifest = JSON.parse(
       await readFile(path.join(repoRoot, CODEX_PLUGIN_SUBDIR, ".codex-plugin/plugin.json"), "utf8"),
     ) as Record<string, unknown>;
@@ -65,8 +65,87 @@ describe("Codex sidecar surfaces", () => {
     expect(manifest).toEqual(CODEX_PLUGIN_MANIFEST);
     expect(manifest.name).toBe("kimi");
     expect(manifest.skills).toBe("./skills/");
-    expect(manifest).not.toHaveProperty("mcpServers");
+    expect(manifest.mcpServers).toBe("./.mcp.json");
     expect(manifest).not.toHaveProperty("hooks");
+  });
+
+  test("Claude MCP discovery launches the plugin companion with the project workspace", async () => {
+    const mcp = JSON.parse(await readFile(path.join(repoRoot, ".mcp.json"), "utf8"));
+
+    expect(mcp).toEqual({
+      mcpServers: {
+        kimi: {
+          command: "${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh",
+          args: ["mcp"],
+          env: {
+            KIMI_PLUGIN_CC_MCP_WORKSPACE: "${CLAUDE_PROJECT_DIR}",
+          },
+        },
+      },
+    });
+  });
+
+  test("Codex MCP launch is plugin-relative and excludes dangerous environment variables", async () => {
+    const supportedEnvVars = [
+      "KIMI_PLUGIN_CC_DATA",
+      "CLAUDE_PLUGIN_DATA",
+      "PLUGIN_DATA",
+      "KIMI_CODE_HOME",
+      "KIMI_PLUGIN_CC_KIMI_BIN",
+      "KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS",
+      "KIMI_PLUGIN_CC_NODE_BIN",
+      "KIMI_PLUGIN_CC_HOOK_SCRIPT",
+      "KIMI_PLUGIN_CC_HOST_ID",
+      "KIMI_MODEL_NAME",
+      "KIMI_MODEL_API_KEY",
+      "KIMI_MODEL_PROVIDER_TYPE",
+      "KIMI_MODEL_BASE_URL",
+      "KIMI_MODEL_THINKING_EFFORT",
+    ];
+    const mcp = JSON.parse(
+      await readFile(path.join(repoRoot, CODEX_PLUGIN_SUBDIR, ".mcp.json"), "utf8"),
+    ) as {
+      mcpServers: {
+        kimi: {
+          type: string;
+          command: string;
+          args: string[];
+          cwd: string;
+          env_vars: string[];
+        };
+      };
+    };
+
+    expect(mcp).toEqual({
+      mcpServers: {
+        kimi: {
+          type: "stdio",
+          command: "./scripts/companion.sh",
+          args: ["mcp"],
+          cwd: ".",
+          env_vars: supportedEnvVars,
+        },
+      },
+    });
+
+    for (const name of [
+      "CLAUDE_PLUGIN_ROOT",
+      "PLUGIN_ROOT",
+      "CLAUDE_PROJECT_DIR",
+      "KIMI_PLUGIN_CC_MCP_WORKSPACE",
+      "KIMI_PLUGIN_CC_WORKSPACE_ROOT",
+      "KIMI_PLUGIN_CC_WORKSPACE_CWD",
+      "KIMI_PLUGIN_CC_SKIP_HOOK_CHECK",
+      "KIMI_PLUGIN_CC_SKIP_VERSION_PROBE",
+      "KIMI_CODE_TRUST_WORKSPACE",
+      "KIMI_CODE_LEGACY_FLAG",
+      "KIMI_CODE_EXPERIMENTAL_FLAG",
+      "KIMI_CODE_EXPERIMENTAL_TOWER",
+      "KIMI_CODE_EXPERIMENTAL_SUBAGENT_FORK",
+      "KIMI_CODE_EXPERIMENTAL_GOAL_COMMAND",
+    ]) {
+      expect(mcp.mcpServers.kimi.env_vars).not.toContain(name);
+    }
   });
 
   test("Codex marketplace stays at repo root and points into the subfolder", async () => {
@@ -103,7 +182,7 @@ describe("Codex sidecar surfaces", () => {
       );
 
       expect(skillFile?.content).toContain(`name: ${skill.name}`);
-      expect(skillFile?.content).toContain("Do not use MCP");
+      expect(skillFile?.content).toContain("Do not use MCP for this skill");
       expect(skillFile?.content).toContain(`"<plugin-root>/scripts/companion.sh" ${skill.command}`);
       expect(openAiFile?.content).toContain(
         `allow_implicit_invocation: ${skill.implicit ? "true" : "false"}`,

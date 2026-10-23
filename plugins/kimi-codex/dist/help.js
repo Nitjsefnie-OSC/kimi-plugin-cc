@@ -35,6 +35,8 @@ export function companionHelp(argv) {
         case "replay": return usage(command, "<job-id>", REPLAY_SUPPORTED_FLAGS, "Replay a completed job's persisted stream log.");
         case "repair-sessions": return usage(command, "[options]", REPAIR_SESSIONS_SUPPORTED_FLAGS, "Preview session metadata repair; --apply writes, --all selects all host-owned repositories.");
         case "worker": return "Usage: companion.sh worker <ask|rescue> <job-id>. Internal detached-worker entry point; launched by ask/rescue, not manually.";
+        case "mcp": return "Usage: companion.sh mcp. Run the Kimi MCP stdio server; normally launched by Claude Code or Codex plugin configuration.";
+        case "mcp-child": return "Usage: companion.sh mcp-child <job-uuid> <model-operation> [arguments]. Internal supervised MCP child; launched by the MCP server, not manually.";
         default: return undefined;
     }
 }

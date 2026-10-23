@@ -1,0 +1,13 @@
+{
+  "mcpServers": {
+    "kimi": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh",
+      "args": [
+        "mcp"
+      ],
+      "env": {
+        "KIMI_PLUGIN_CC_MCP_WORKSPACE": "${CLAUDE_PROJECT_DIR}"
+      }
+    }
+  }
+}

@@ -305,7 +305,7 @@ export async function runCliPrompt(opts) {
         args,
         command_label: opts.commandLabel ?? null,
     });
-    return await new Promise((resolve, reject) => {
+    return await new Promise(async (resolve, reject) => {
         let aborted = false;
         let cancellationTeardown;
         let settlementStarted = false;
@@ -535,6 +535,16 @@ export async function runCliPrompt(opts) {
         // the spawned child cannot escape cancellation teardown.
         if (opts.signal?.aborted === true) {
             onAbort();
+        }
+        if (child.pid !== undefined && opts.onSpawn) {
+            try {
+                await opts.onSpawn(child.pid);
+            }
+            catch (error) {
+                onAbort();
+                settle("reject", new RuntimeError("CLI_SPAWN_CALLBACK_FAILED", `Failed to record the spawned kimi process: ${formatError(error)}`, "cli-client.spawn", error instanceof Error ? { cause: error, details: errorDetails() } : { details: errorDetails() }));
+                return;
+            }
         }
         earlyErrorHandled = true;
         child.on("error", (err) => {

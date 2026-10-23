@@ -17,6 +17,8 @@ The dispatcher in `companion.ts` exposes:
 - `task swarm` to run a read-only parallel review
 - `task swarm --write` to prepare a patch in a temporary Git worktree without applying it
 - `status`, `result`, and `cancel` to manage stored jobs
+- `mcp` to serve the seven model operations and MCP job controls over stdio
+- `mcp-child <job-uuid>` as the private fixed-ID companion launched by that server
 - `replay <job-id>` to render a stored stream log again
 
 ## Main modules
@@ -24,6 +26,7 @@ The dispatcher in `companion.ts` exposes:
 | Module | Responsibility |
 | --- | --- |
 | `companion.ts` | Dispatch companion subcommands |
+| `mcp/` | Define typed tools, frame stdio, negotiate tasks, supervise fixed-ID children, and bind job ownership |
 | `cli-client.ts` | Build the child environment and arguments, parse output, enforce provenance, and cancel the process tree |
 | `kimi-engine.ts` | Select a certified engine and persist the execution plan |
 | `native-v2-preflight.ts` | Refuse plan-mode settings, unsafe experimental selectors, and unsafe resume journals |
@@ -41,13 +44,15 @@ The dispatcher in `companion.ts` exposes:
 
 ## Runtime behavior
 
-Every model command verifies the current host's hook before spawning. The review gate skips visibly if enforcement is unavailable. Native-v2 sessions also pass the independent no-plan checks before spawn and at the spawn boundary.
+Every model command verifies the current host's hook before spawning the Kimi CLI. The review gate skips visibly if enforcement is unavailable. Native-v2 sessions also pass the independent no-plan checks before the Kimi CLI spawn and at the spawn boundary.
+
+MCP launches attach only after cancellation handlers are installed, with a 60-second bound. Verified teardown can close a stalled launch; missing identity or inconclusive termination evidence keeps it starting and recoverable by ID. `kimi_pid` is recorded at actual spawn. Host workspace defaults are containment boundaries, not arbitrary overrides.
 
 `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` bypasses hook verification only. It is a test and diagnostic option, not a repair path. It does not bypass engine certification, provenance, or the native-v2 preflight.
 
 Cancellation waits for process teardown. On POSIX systems, the runtime checks descendant identities before signaling and waits for a bounded period after forced termination. Windows lacks equivalent process-tree support.
 
-Commands return Kimi's prose. The review gate is the exception: it parses a JSON allow/block decision and permits the host to stop on malformed output. Enable this optional Claude Code Stop hook with `/kimi:setup --enable-review-gate`.
+Slash-command and skill model operations return Kimi's prose. The review gate parses a JSON allow/block decision and permits the host to stop on malformed output. MCP returns protocol envelopes, task or launch handles, and structured job-control metadata. Enable the optional Claude Code Stop hook with `/kimi:setup --enable-review-gate`.
 
 Model selection follows the [model and provider contract](../docs/models.md). The plugin does not enforce a per-task thinking setting. `--thinking <effort>` requests effort for this process through `KIMI_MODEL_THINKING_EFFORT`; upstream provider/model rules can ignore it and stream-json cannot reveal whether it was honoured. `--no-thinking` is rejected; use `--thinking off`.
 

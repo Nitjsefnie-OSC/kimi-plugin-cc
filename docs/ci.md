@@ -18,8 +18,10 @@ The full check covers:
 - compiled runtime output
 - Claude surface hashes and generated Codex surfaces
 - TypeScript types
-- the test suite
+- the test suite, including real-process MCP protocol, task recovery, ownership, cancellation, and hook-enforcement coverage
 - changed or untracked files in `dist/` and `plugins/kimi-codex/`
+
+`bun run check:package` additionally packs the release tarball and runs modern MCP discovery plus legacy initialization on both extracted compiled distributions. These checks use mock-backed or protocol-only fixtures and make no provider calls.
 
 The real-binary smoke suite skips unless explicitly enabled. A successful base CI run does not certify a new CLI version.
 

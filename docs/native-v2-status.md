@@ -1,15 +1,15 @@
-# Native v2 status — 2026-10-23
+# Native v2 status — 2026-10-24
 
-Plugin 2.3.1 certifies exact CLI 2.3.1 for all eight operations under the
+Plugin 2.4.0 preserves exact CLI 2.3.1 certification for all eight operations under the
 unchanged no-plan construction, alongside 0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2,
-2.1.0, 2.1.1, 2.2.0 and 2.3.0. The 2.3.1 tag scan, plan-ON/OFF controls and full
-candidate smoke passed (15/15, no skips). Workspace trust and session locking
-changed without adding a plan-arming vector or a print-mode takeover path.
+2.1.0, 2.1.1, 2.2.0 and 2.3.0, and adds the shared MCP transport. The 2.3.1 tag scan,
+plan-ON/OFF controls and full candidate smoke passed (15/15, no skips). Workspace trust
+and session locking changed without adding a plan-arming vector or a print-mode takeover path.
 See [evidence and limits](upstream-2.3.1-certification.md).
 
 Plugin and CLI versions are independent even when deliberately aligned:
-plugin 2.3.1 adds CLI 2.3.1 support. Publication does not update installed
-hosts or the operator's CLI pin.
+plugin 2.3.1 added CLI 2.3.1 support; plugin 2.4.0 retains that certification.
+Publication does not update installed hosts or the operator's CLI pin.
 
 > **2.3.0 (certified 2026-10-22, plugin 2.2.2):** the reload path rereads trusted
 > operator journals; the earlier monitor's fix-first conclusion was corrected,

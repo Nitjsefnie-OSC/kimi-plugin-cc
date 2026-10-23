@@ -30,6 +30,9 @@ export function normalizeJobError(error) {
     };
 }
 export async function markJobFailed(store, paths, job, error, summary = "Job failed.", options) {
+    const current = store.getJob(job.job_id) ?? job;
+    if (current.status !== "running")
+        return current;
     if (options?.partialOutput) {
         const label = job.command_type[0].toUpperCase() + job.command_type.slice(1);
         summary = `${label} timed out after ${formatBudgetDuration(options.partialOutput.budgetMs)}; partial output captured (${options.partialOutput.text.trim().length} chars).`;
@@ -55,6 +58,9 @@ export async function markJobFailed(store, paths, job, error, summary = "Job fai
     }) ?? artifactJob);
 }
 export async function markJobCancelled(store, paths, job, summary, error, options) {
+    const current = store.getJob(job.job_id) ?? job;
+    if (current.status !== "running")
+        return current;
     const normalized = error ? normalizeJobError(error) : null;
     const phase = options?.phase;
     const artifactJob = {
@@ -77,6 +83,8 @@ export async function markJobCancelled(store, paths, job, summary, error, option
 }
 export async function sweepStaleJobs(store, paths) {
     for (const job of store.listRunningJobsWithProcessHints()) {
+        if (store.getMcpTask(job.job_id))
+            continue;
         if (!isStaleEnoughToSweep(job)) {
             continue;
         }
@@ -109,7 +117,7 @@ export async function sweepStaleJobs(store, paths) {
         await markJobFailed(store, paths, job, new RuntimeError("FOREGROUND_PROCESS_DISAPPEARED", describeMissingForegroundProcess(job, companionMissing, kimiMissing), "jobs.sweep"), "Foreground Kimi job disappeared before reporting a terminal state.", job.command_type === "ask" || job.command_type === "rescue" ? { phase: "failed" } : undefined);
     }
 }
-const STALE_SWEEP_GRACE_MS = 15_000;
+export const STALE_SWEEP_GRACE_MS = 15_000;
 function isStaleEnoughToSweep(job) {
     const updatedAt = Date.parse(job.updated_at);
     return Number.isFinite(updatedAt) && Date.now() - updatedAt >= STALE_SWEEP_GRACE_MS;

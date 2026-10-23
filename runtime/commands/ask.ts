@@ -1,5 +1,5 @@
 import { companionHelp } from "../help.js";
-import { randomUUID } from "node:crypto";
+import { allocateJobId } from "../job-id.js";
 import path from "node:path";
 
 import { createCliCancellationHandlers } from "../cli-cancellation.js";
@@ -81,7 +81,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
   try {
     await sweepStaleJobs(store, paths);
 
-    const jobId = randomUUID();
+    const jobId = allocateJobId(context);
     const sessionResolution = await resolveAskSession(
       store,
       repoIdentity.repoId,
@@ -201,6 +201,7 @@ export async function executeAskJob(
     }
     handlers = createCliCancellationHandlers();
     const executionPlan = executionPlanFromPersisted(job);
+    store.updateRunningJob(job.job_id, { phase: "turn-running" });
 
     // Re-validate resume lineage from the store before spawning: a detached
     // worker (or a forged queued row) reloads the persisted plan and would
@@ -227,6 +228,7 @@ export async function executeAskJob(
         thinkingEffort: job.thinking_effort ?? undefined,
         resumeSessionId: job.kimi_session_id ?? undefined,
         logPath: job.stream_log_path,
+        onSpawn: (pid) => { store.updateRunningJob(job.job_id, { kimi_pid: pid }); },
         signal: handlers.signal,
       },
       job.budget_ms ?? KIMI_ASK_PROMPT_TIMEOUT_MS,
