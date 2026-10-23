@@ -6,7 +6,7 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-The current release candidate is plugin **2.3.1**, certifying exact CLI **2.3.1**; publication is pending final repository and CI gates. See the [certification evidence](./upstream-2.3.1-certification.md).
+Plugin **2.3.1** certifies exact CLI **2.3.1**. [Release v2.3.1](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.3.1) is anchored at `20011ff0554c611afe0a426b30a68c2473175568`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977037533) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977818482) passed. The registry tarball has SHA-1 `e309448480a2ce841b49840cdaeeed37acc6c50b`, contains 196 files, and matches the CI artifact byte-for-byte. See the [certification evidence](./upstream-2.3.1-certification.md).
 The previous verified publication was **2.2.2**:
 [Release v2.2.2](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.2.2)
 is anchored at `256e78ff7cbf302fb19e8e523d8e3f943f7cb366`; its

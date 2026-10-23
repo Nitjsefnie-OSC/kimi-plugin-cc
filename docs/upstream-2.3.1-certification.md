@@ -113,4 +113,9 @@ repository's gitignored `.tmp/`; no host setup or CLI pin was changed.
   were relaxed.
 - Package validation: **passed**, 196 packed files, both compiled
   distributions, isolated hook setup/check and unsupported-version refusal.
-  CI and publication results are recorded below after they complete.
+- Release commit `20011ff` passed [CI run 39977037533](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977037533).
+  The annotated `v2.3.1` tag and [GitHub release](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.3.1)
+  triggered [successful OIDC publication run 39977818482](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977818482).
+  The registry tarball has SHA-1 `e309448480a2ce841b49840cdaeeed37acc6c50b`,
+  contains 196 files, and matches the CI artifact byte-for-byte. No host
+  installation or CLI pin was changed.
