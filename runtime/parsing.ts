@@ -1,16 +1,8 @@
 import { RuntimeError } from "./errors.js";
 
 /**
- * Tokens like `--foo` or `-x` that aren't in a command's known-flags set are
- * almost certainly typos (e.g. `--from HEAD~2` instead of `--base HEAD~2`)
- * or — for agent-mediated callers — hallucinated flag names (e.g. wrappers
- * inventing `--file` / `--context` because that shape is common in other
- * CLIs). The historical behavior — silently treating them as free-form
- * trailing prompt/focus text with an advisory stderr warning — produced
- * misleading runs (Kimi chewing on a bloated blob, or hitting the prompt
- * timeout). All command parsers now hard-fail on unknown flag-shaped tokens
- * while still preserving prose mode after the first non-flag token and the
- * `--` escape.
+ * Unknown flag-shaped tokens hard-fail instead of being absorbed into prose.
+ * Parsing still switches to prose at the first non-flag token or after `--`.
  */
 function looksLikeFlag(token: string): boolean {
   if (!token.startsWith("-")) {
@@ -89,7 +81,7 @@ export interface PursueArgs extends KimiFlagState {
   budgetMs?: number;
   /**
    * Soft per-goal turn cap. NOT enforceable headless — injected into the
-   * objective text as a model instruction so kimi calls SetGoalBudget itself.
+   * objective as a stop instruction, never a request to mutate the denied goal budget.
    */
   turns?: number;
   objective?: string;
@@ -99,9 +91,9 @@ export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|me
 
 export interface SwarmArgs extends KimiFlagState {
   /**
-   * Hard wall-clock ceiling in ms — the ONLY hard bound on a read-only swarm
-   * (subagent count is a soft hint; see `cap`). Undefined means "apply the
-   * command default" (swarm.ts owns the default so parsing stays timeout-free).
+   * Hard wall-clock ceiling in ms — the hard bound on total runtime. Undefined
+   * means "apply the command default" (swarm.ts owns the default so parsing
+   * stays timeout-free).
    */
   budgetMs?: number;
   /**
@@ -113,26 +105,24 @@ export interface SwarmArgs extends KimiFlagState {
    */
   cap?: number;
   /**
-   * HARD ceiling on CONCURRENT subagents, exported to the spawn as
-   * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY (kimi-code 0.18.0+, PR #888); older
-   * binaries ignore the unknown env var. Distinct from `cap`: concurrency
-   * (how many run simultaneously) ≠ total count (how many run over the whole
-   * life of the swarm). See runtime/cli-client.ts buildEnv.
+   * Concurrent-subagent ceiling exported as
+   * KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY and enforced on kimi-code 0.18.0+;
+   * older binaries ignore it. Distinct from `cap`: concurrency (how many run
+   * simultaneously) ≠ total count (how many run over the whole life of the
+   * swarm). See runtime/cli-client.ts buildEnv.
    *
    * Undefined here means "apply the command default" — swarm.ts owns it
    * (resolveSwarmMaxConcurrency → SWARM_DEFAULT_MAX_CONCURRENCY) so parsing
-   * stays policy-free, mirroring `budgetMs`. The ceiling is therefore never
-   * actually unset on a real run: an auto-dispatchable fan-out is bounded by
-   * construction.
+   * stays policy-free, mirroring `budgetMs`. The setting is always supplied;
+   * pre-0.18 read-only swarms retain only the wall-clock hard bound.
    */
   maxConcurrency?: number;
   /**
-   * WRITE MODE (v1.4). Default false → today's read-only fan-out, unchanged. When
-   * true, the swarm spawns its coordinator in an ephemeral throwaway git worktree
-   * (off HEAD) and lets `coder` subagents EDIT files there; the result is a
-   * reviewable patch the main thread applies (see runtime/commands/swarm.ts and
-   * .claude/docs/write-swarm-spec.md). Write mode requires kimi-code >= 0.18.0
-   * (hard concurrency env), a git repo with a born HEAD, and the PreToolUse hook.
+   * Optional write mode. By default the swarm is read-only. When true, the
+   * coordinator spawns in an ephemeral throwaway git worktree off HEAD and
+   * `coder` subagents edit there; the result is a reviewable patch for the user
+   * (see runtime/commands/swarm.ts and docs/safety.md). Write mode requires
+   * kimi-code >= 0.18.0, a git repo with a born HEAD, and the PreToolUse hook.
    */
   write?: boolean;
   objective?: string;
@@ -142,8 +132,8 @@ export const SWARM_SUPPORTED_FLAGS =
   "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 
 /**
- * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
- * no --background/--fresh/--resume. Trailing tokens are the objective.
+ * Parser for /kimi:swarm. Foreground-only: no --background/--fresh/--resume.
+ * Trailing tokens are the objective.
  */
 export function parseSwarmArgs(argv: string[]): SwarmArgs {
   let model: string | undefined;
@@ -420,7 +410,6 @@ export interface JobLookupArgs {
   json: boolean;
 }
 
-/** Help before -- wins even over malformed flags or prose trailing-token mode. */
 const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
 
 /**
@@ -825,11 +814,6 @@ function parseKnownFlags(
 
     if (!knownFlags.has(token)) {
       if (looksLikeFlag(token)) {
-        // Wrapper agents routinely hallucinate flags like `--file` /
-        // `--context` because that shape is common in other CLIs. Silently
-        // slurping them into focus text produced a bloated prompt that
-        // looked like a hang. Hard-fail with the supported list inline so
-        // the error message itself is the correction.
         throw new RuntimeError(
           "INVALID_ARGS",
           `Unknown flag ${token} for ${commandName}. Supported flags: ${REVIEW_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped focus text to pass it through.`,

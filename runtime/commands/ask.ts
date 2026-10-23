@@ -34,32 +34,27 @@ import {
 import { warnInheritedBudget, captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
-// v1.0 cutover note (PR 2):
-//
-//   The v0.4 wire client/initialize/prompt sequence is replaced with a
-//   single `runCliPrompt` against `kimi -p --output-format stream-json`.
-//   The PreToolUse hook reads `KIMI_PLUGIN_CC_CMD=ask` and applies the
-//   same read-only tool policy as review/challenge/review_gate.
-//
-// Session id handling differs from v0.4:
-//
-//   - v0.4 the client assigned the kimi session id upfront (passed via
-//     `--session <uuid>` on the wire command line).
-//   - v1.0 kimi-code assigns the session id and announces it via stderr
-//     ("To resume this session: kimi -r <uuid>"). We capture that id
-//     after the call and update the JobStore row.
-//   - For `--resume`, we pass the prior session id via `-r`; kimi-code
-//     keeps it across resumes.
-
 const ASK_SUMMARY_MAX = 120;
 const ASK_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
-const ASK_PROMPT_PREFIX = [
-  "Answer the user's question directly in free-form prose.",
-  "Stay read-only.",
+const ASK_PROMPT_CONTRACT = [
+  "Answer directly in free-form prose.",
+  "For repository-dependent questions, inspect the relevant code with the allowed read tools and cite file:line for concrete code claims where useful.",
+  "Distinguish evidence from inference and state unknowns explicitly.",
+  "Do not use shell/Bash, writes, background tasks, or delegated operations.",
   "Do not emit JSON unless the user explicitly asks for it.",
+  "Do not narrate tool progress; make the final response self-contained.",
+];
+const ASK_PROMPT_PREFIX = [
+  ...ASK_PROMPT_CONTRACT,
   "",
   "User question:",
   "",
+].join("\n");
+const ASK_CONTINUE_TASK = "Continue the previous ask conversation and answer any outstanding question.";
+const ASK_RESUME_PROMPT = [
+  ...ASK_PROMPT_CONTRACT,
+  "",
+  ASK_CONTINUE_TASK,
 ].join("\n");
 
 interface AskSessionResolution {
@@ -124,7 +119,7 @@ export async function runAsk(argv: string[], context: CommandContext): Promise<s
       ...persistedExecutionPlanFields(executionPlan),
       agent_profile: ASK_AGENT_PROFILE_PLACEHOLDER,
       prompt_digest: digestPrompt(askPrompt),
-      summary: shorten(parsed.prompt ?? askPrompt, ASK_SUMMARY_MAX),
+      summary: shorten(askPromptSubject(askPrompt), ASK_SUMMARY_MAX),
       phase: parsed.background ? "queued" : "starting",
       final_output_path: null,
       stream_log_path: logPath,
@@ -259,9 +254,7 @@ export async function executeAskJob(
       result.sessionId !== undefined &&
       result.sessionId.length > 0
     ) {
-      // length>0 guard: empty-string capture would poison the row. The
-      // warning helper's null-ish check would also fire but only after
-      // the bad write. (Kimi alpha.4 challenge finding #3.)
+      // Never persist an empty ID because NULL represents a missing session ID.
       store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
@@ -269,7 +262,7 @@ export async function executeAskJob(
       env: context.env,
       cwd: job.cwd,
       sessionId: result.sessionId ?? job.kimi_session_id,
-      title: buildKimiSessionTitle("ask", prompt.startsWith(ASK_PROMPT_PREFIX) ? prompt.slice(ASK_PROMPT_PREFIX.length) : prompt),
+      title: buildKimiSessionTitle("ask", askPromptSubject(prompt)),
       stderr: context.stderr,
     });
     // For ask, missing session id breaks both -r (latest-resume) and
@@ -447,14 +440,15 @@ function buildAskPrompt(question: string | undefined, reusedSession: boolean): s
   }
 
   if (reusedSession) {
-    return [
-      "Continue the previous ask conversation in free-form prose.",
-      "Stay read-only.",
-      "Do not emit JSON unless the user explicitly asks for it.",
-    ].join("\n");
+    return ASK_RESUME_PROMPT;
   }
 
   throw new RuntimeError("INVALID_ARGS", "ask requires a question after the flags.", "ask.parse");
+}
+
+function askPromptSubject(prompt: string): string {
+  if (prompt.startsWith(ASK_PROMPT_PREFIX)) return prompt.slice(ASK_PROMPT_PREFIX.length);
+  return prompt === ASK_RESUME_PROMPT ? ASK_CONTINUE_TASK : prompt;
 }
 
 function shorten(text: string, max: number): string {

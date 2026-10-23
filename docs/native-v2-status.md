@@ -1,16 +1,20 @@
-# Native v2 status — 2026-10-22
+# Native v2 status — 2026-10-23
 
-Plugin 2.2.2 certifies exact CLI 2.3.0 for all eight operations under the
+Plugin 2.3.1 certifies exact CLI 2.3.1 for all eight operations under the
 unchanged no-plan construction, alongside 0.42.0, 0.43.0, 0.43.1, 2.0.0–2.0.2,
-2.1.0, 2.1.1 and 2.2.0. The 2.3.0 tag scan, plan-ON/OFF controls and full
-candidate smoke passed (15/15, no skips). The reload path rereads trusted
-operator journals; the earlier monitor's fix-first conclusion is corrected,
-not hidden by a speculative runtime guard. Structured occupied-session
-errors now retain their diagnostic reason.
-See [evidence and limits](upstream-2.3.0-certification.md).
+2.1.0, 2.1.1, 2.2.0 and 2.3.0. The 2.3.1 tag scan, plan-ON/OFF controls and full
+candidate smoke passed (15/15, no skips). Workspace trust and session locking
+changed without adding a plan-arming vector or a print-mode takeover path.
+See [evidence and limits](upstream-2.3.1-certification.md).
 
-Plugin and CLI versions are independent: plugin 2.2.2 adds CLI 2.3.0 support.
-Publication does not update installed hosts or the operator's CLI 2.2.0 pin.
+Plugin and CLI versions are independent even when deliberately aligned:
+plugin 2.3.1 adds CLI 2.3.1 support. Publication does not update installed
+hosts or the operator's CLI pin.
+
+> **2.3.0 (certified 2026-10-22, plugin 2.2.2):** the reload path rereads trusted
+> operator journals; the earlier monitor's fix-first conclusion was corrected,
+> not hidden by a speculative runtime guard. Structured occupied-session errors
+> retain their diagnostic reason. See [evidence](upstream-2.3.0-certification.md).
 
 > **2.2.0 (certified 2026-10-14):** source scan, controls and 15/15 smoke
 > passed; `KIMI_CODE_TRUST_WORKSPACE` is stripped from child environments.

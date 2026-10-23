@@ -205,7 +205,10 @@ describe("warnIfSessionIdMissing", () => {
     const msg = stub.written[0]!;
     expect(msg).toContain("[ask]");
     expect(msg).toContain("job-uuid-456");
-    expect(msg).toContain("Resume and replay will not work");
+    expect(msg).toContain("Resume will not work for this job");
+    expect(msg).toContain("Replay from the stored stream log is unaffected");
+    expect(msg).toContain("session.resume_hint");
+    expect(msg).not.toContain("Resume and replay will not work");
   });
 
   test("writes a loud warning when sessionId is the empty string (alpha.4 finding #3 lock)", () => {

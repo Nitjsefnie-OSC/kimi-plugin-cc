@@ -5,12 +5,10 @@
 //
 //   [[hooks]]
 //   event = "PreToolUse"
-//   command = "node /abs/path/to/dist/hooks/approval-hook.js"
+//   command = "'/abs/path/to/node' '/abs/path/to/dist/hooks/approval-hook.js'"
 //   timeout = 15
 //
-// Hook protocol (kimi-code agent-core/src/session/hooks/runner.ts —
-// path was agent/hooks/ in 0.4.0 and earlier; relocated to session/hooks/
-// in 0.5.0 with byte-identical file contents):
+// Hook protocol:
 //
 //   stdin:  full hook payload as JSON
 //   stdout: optional structured JSON (only consulted when exit code is 0)
@@ -19,23 +17,14 @@
 //   exit 2: deny — `stderr.trim()` becomes the reason surfaced to the model
 //   any other exit code: fall through to allow (fail-open)
 //
-// We use exit-code signaling rather than structured JSON because:
+// Exit 2 + stderr avoids structured-output version-skew hazards, and the
+// runner short-circuits it before reading structured output. Because any other
+// exit fails open upstream, every code path here is wrapped so an unexpected
+// error exits 2 with a "hook misconfigured" reason instead.
 //
-//   1. Exit 2 + stderr is the simpler contract — fewer surfaces for a
-//      version skew between us and kimi-code to break safety.
-//   2. The runner short-circuits exit-2 before structuredOutput() is
-//      called, so emitting both would be redundant.
-//   3. A crash in our hook would normally exit non-zero and silently
-//      allow (fail-open). We compensate by wrapping every code path in
-//      try/catch and exiting 2 with a "hook misconfigured" reason on
-//      any unexpected error.
-//
-// Process boundary:
-//
-//   kimi-code spawns this hook with `shell: true` (see runner.ts:46-53,
-//   where `spawn(command, { shell: true, ... })` is invoked).
-//   The TOML command is parsed by `/bin/sh -c "..."` so the resolved
-//   `node /abs/path/...` works regardless of where it's invoked from.
+// kimi-code spawns the command with `shell: true`. The canonical command is two
+// shell-quoted absolute tokens — the resolved Node binary and hook script — so
+// `/bin/sh -c` does not depend on its working directory or PATH.
 
 import { decideHookOutcome, type HookInput } from "./approval-policy.js";
 import { evaluateRescueHookRequest } from "../rescue-approval.js";

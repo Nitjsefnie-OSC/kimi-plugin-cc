@@ -23,6 +23,10 @@ The check rebuilds the runtime, checks generated surfaces, typechecks, runs test
 
 Claude commands, agents, and plugin manifests have locked hashes in `scripts/surface-registry.ts`. Update the affected hashes after editing those files, then regenerate surfaces.
 
+## Keep code comments useful
+
+Write comments only for current, non-obvious constraints, upstream quirks, and safety boundaries. Do not add cutover narratives, PR or reviewer attributions, release history, or narration that merely restates code and tests. Update or delete stale comments in the same change that makes them stale. Put release history in `CHANGELOG.md` or `ROADMAP-TO-GA.md`, and exact-version certification evidence in `docs/upstream-*-certification.md`.
+
 Use these commands during development:
 
 - `bun run build` to compile `runtime/` into `dist/`
@@ -48,10 +52,12 @@ The opt-in smoke suite uses real model calls to check hooks, engine provenance, 
 bun run smoke:real
 ```
 
-Read [smoke authentication and run instructions](./docs/ci.md#running-the-same-gate-locally) before running it. The harness copies selected files from a seed Kimi home into temporary homes, including credentials when present. Do not treat it as a credential-free check. Use an authorized test account or explicitly authorized temporary credential copies, and run live tests sequentially.
+Read [smoke authentication and run instructions](./docs/ci.md#running-the-same-gate-locally) before running it. The harness copies selected config files and symlinks OAuth credential stores into temporary homes; it never copies those stores. Do not treat it as a credential-free check. Use an authorized test account or explicitly authorized shared credential symlinks, and run live tests sequentially.
 
 Normal `bun run check` skips these tests. A skipped smoke does not certify a release. The [upstream audit playbook](./docs/upstream-compat-audit.md) defines the additional gates for a new CLI version.
 
 ## Release a change
 
 Follow [the release checklist](./AGENTS.md#releasing) and [npm publishing guide](./docs/registry-releases.md). Plugin versions advance independently of the upstream CLI; compatible maintenance and certification updates take the next unused plugin patch. Plugin-only fixes do not change the certified CLI table. Never reuse a published plugin version. Matching version numbers never replace the source audit or live tests. Documentation-only updates do not require a release tag.
+
+Name Kimi and other substantive contributors in commit trailers and release notes. Credit implementation and review work accurately; do not invent usernames, email addresses, or verified account links.

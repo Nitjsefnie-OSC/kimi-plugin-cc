@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runAsk } from "../../runtime/commands/ask.js";
@@ -387,8 +387,68 @@ describe("ask session resume", () => {
       await cleanupTestPath(repoB);
     }
   });
+
+  test("bare resume keeps instructions out of the running summary and fallback title", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("ask-resume-metadata");
+    const repoRoot = await createGitRepoFixture("ask-resume-metadata-repo");
+    const kimiHome = await createTestPluginDataRoot("ask-resume-metadata-kimi-home");
+    const invocationPath = path.join(pluginDataRoot, "ask-resume-metadata.jsonl");
+    const sessionId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
+    const env = {
+      ...makeMockEnv(pluginDataRoot, "ask-success", invocationPath, { delayMs: 5000 }),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+    };
+    const repoId = await getRepoId(repoRoot);
+    const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
+    const continuation = "Continue the previous ask conversation and answer any outstanding question.";
+
+    try {
+      await runAsk(["Initial", "question"], makeContext(repoRoot, {
+        ...env,
+        KIMI_PLUGIN_CC_MOCK_DELAY_MS: "0",
+      }));
+      const startOutput = await runAsk(["--background", "-r"], makeContext(repoRoot, env));
+      const started = JSON.parse(startOutput) as { job_id: string };
+      const store = new JobStore(resolvePluginPaths(env));
+      try {
+        expect(store.getJob(started.job_id)?.summary).toBe(continuation);
+      } finally {
+        store.close();
+      }
+
+      await waitForJobState(env, repoId, (job) => job?.job_id === started.job_id && job.status === "completed", 15_000);
+      const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      expect(state.title).toBe(`Kimi Ask: ${continuation}`);
+      expect(state.lastPrompt).toContain("Answer directly in free-form prose.");
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  }, 20_000);
 });
 
 async function getRepoId(repoRoot: string): Promise<string> {
   return (await resolveRepoIdentity(repoRoot)).repoId;
+}
+
+async function seedKimiSession(kimiHome: string, sessionId: string, workDir: string): Promise<string> {
+  const sessionDir = path.join(kimiHome, "sessions", "wd_repo_123", sessionId);
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    path.join(kimiHome, "session_index.jsonl"),
+    `${JSON.stringify({ sessionId, sessionDir, workDir })}\n`,
+    "utf8",
+  );
+  const statePath = path.join(sessionDir, "state.json");
+  await writeFile(statePath, `${JSON.stringify({
+    id: sessionId,
+    version: 2,
+    cwd: workDir,
+    title: "New Session",
+    titleKind: "replaceable",
+    isCustomTitle: false,
+  }, null, 2)}\n`, "utf8");
+  return statePath;
 }

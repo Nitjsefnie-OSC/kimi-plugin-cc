@@ -6,7 +6,7 @@
 //   chain-breaking `event.allow()` is the plan-file guard
 //   (features/plan/planService.ts:110), and it fires only while plan mode is
 //   ACTIVE. Plan mode can arm in a plugin-spawned `kimi -p` session in exactly
-//   three ways (re-established at exact 0.42.0, 0.43.0, 0.43.1 and 2.0.0):
+//   three ways:
 //     A. `default_plan_mode = true` in <KIMI_CODE_HOME>/config.toml, read ONCE
 //        inside sessions.create() (single user file; no env, argv or project
 //        overlay; invalid values fall back to false upstream);

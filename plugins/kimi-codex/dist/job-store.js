@@ -542,35 +542,13 @@ function translateSqliteError(error) {
     return new RuntimeError("JOB_STORE_ERROR", `Job store operation failed: ${formatError(error)}`, "job-store", error instanceof Error ? { cause: error } : undefined);
 }
 /**
- * Run a function with a temporary `JobStore` whose handle is closed when
- * the function returns OR when the function throws after construction
- * succeeded.
- *
- * Construction-failure note: if `new JobStore(paths)` itself throws,
- * this helper cannot close anything — the constructor's own try/catch
- * owns adapter-handle cleanup on mid-migration failures. The helper
- * handles "store opened cleanly, function threw"; the constructor
- * handles "open or migrate failed mid-construction." Together they
- * make the leak class unreachable.
- *
- * Consolidates the repeated
- *
- *     const store = new JobStore(paths);
- *     try { ... } finally { store.close(); }
- *
- * dance that every command file used to copy. For the rare case where
- * the caller needs to keep a reference to the store past the function
- * body (e.g., async cancel handlers that close elsewhere), continue
- * using the explicit `new JobStore` + try/finally idiom — `withJobStore`
- * is for the common single-scope case.
+ * Run a function with a temporary `JobStore`, closing its handle on return or
+ * throw after construction succeeds. The constructor owns cleanup when opening
+ * or migrating the store fails.
  */
 export async function withJobStore(paths, fn) {
-    // Construct INSIDE the try. `new JobStore` must not live above this
-    // line — the constructor can throw after opening the SQLite adapter
-    // (pragma failure, schema migration), and the helper's `finally`
-    // is the second line of defense behind the constructor's own
-    // cleanup. Moving `new JobStore` above the try would silently
-    // reintroduce a handle leak the JSDoc above promises against.
+    // Keep construction inside try: the constructor cleans up its own failures,
+    // while this finally closes every successfully constructed store.
     let store;
     try {
         store = new JobStore(paths);
@@ -591,7 +569,6 @@ export function withJobStoreSync(paths, fn) {
         store?.close();
     }
 }
-/** Old non-null budgets have unknown provenance; never invent explicit intent. */
 /** Parsed `hook_escapes` column for JSON envelopes: [] when NULL or unreadable. */
 export function parseHookEscapes(raw) {
     if (!raw)
@@ -604,6 +581,7 @@ export function parseHookEscapes(raw) {
         return [];
     }
 }
+/** Old non-null budgets have unknown provenance; never invent explicit intent. */
 export function renderBudgetSource(job) {
     return job.budget_source ?? (job.budget_ms === null ? "default" : "unknown");
 }

@@ -47,21 +47,12 @@ export function reassembleProseFromRecords(records: ReadonlyArray<StreamJsonReco
 }
 
 /**
- * Loud-fail warning when kimi finished a job but never announced a
- * session id on stderr. We persist `kimi_session_id` as NULL in that
- * case (the row is unresumable), and the user is silently surprised
- * later when `-r` or `/kimi:replay` returns nothing.
+ * Warn when kimi finishes without announcing a session ID. The job keeps
+ * `kimi_session_id` NULL, so resume is unavailable.
  *
- * The right surface is human-readable stderr per the LLM-caller
- * discipline invariant — load-bearing context still goes via the SQLite
- * row (`kimi_session_id IS NULL`), but the user sees this warning
- * inline immediately after the prompt completes so they know resume is
- * unavailable for this job.
- *
- * Called at the end of every command that captures sessionId (review,
- * challenge, ask, rescue). Review-gate intentionally skips: it's a Stop
- * hook with no resume semantics and we don't want a runtime warning to
- * leak into Claude Code's transcript on every assistant turn.
+ * This warning belongs on human stderr; load-bearing state remains in SQLite.
+ * Review-gate intentionally skips it because a Stop hook has no resume
+ * semantics and should not warn on every assistant turn.
  */
 export function warnIfSessionIdMissing(
   result: CliClientResult,
@@ -74,8 +65,8 @@ export function warnIfSessionIdMissing(
   }
   stderr.write(
     `[${commandLabel}] kimi did not announce a session id for job ${jobId}. ` +
-      `Resume and replay will not work for this job. ` +
-      `If this happens repeatedly, check kimi-code's stderr format (the " To resume this session" line) and report upstream.\n`,
+      `Resume will not work for this job. Replay from the stored stream log is unaffected. ` +
+      `If this happens repeatedly, check kimi-code's session.resume_hint record (and the legacy stderr resume announcement) and report upstream.\n`,
   );
 }
 

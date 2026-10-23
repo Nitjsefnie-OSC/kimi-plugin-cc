@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { readFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { runCancel } from "../../runtime/commands/cancel.js";
@@ -7,7 +7,7 @@ import { runRescue } from "../../runtime/commands/rescue.js";
 import { runResult } from "../../runtime/commands/result.js";
 import { runStatus } from "../../runtime/commands/status.js";
 import { JobStore } from "../../runtime/job-store.js";
-import { waitForTerminalJob } from "../../runtime/jobs.js";
+import { digestPrompt, waitForTerminalJob } from "../../runtime/jobs.js";
 import { resolvePluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
 import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
@@ -39,6 +39,18 @@ const RESCUE_SUCCESS_OUTPUT = [
   "- Updated note.txt with the requested fix.",
   "- Ran pwd to verify the workspace context.",
   "- Mock verification passed.",
+  "",
+].join("\n");
+const RESCUE_CONTINUE_TASK = "Continue the previous rescue task using the latest repository state.";
+const EXPECTED_RESCUE_PROMPT_PREFIX = [
+  "Follow repository instructions and inspect the current state before editing.",
+  "Implement the smallest complete change that satisfies the task instead of stopping at a plan.",
+  "Do not mutate git state.",
+  "Run proportionate relevant checks, and never claim unrun checks passed.",
+  "Do not narrate progress.",
+  "Finish with a self-contained report of changed files, verification commands and results, and unfinished work or blockers.",
+  "",
+  "Rescue task:",
   "",
 ].join("\n");
 
@@ -79,6 +91,12 @@ function parseStartedJobId(output: string): string {
   return (JSON.parse(output) as { job_id: string }).job_id;
 }
 
+function promptFromArgv(argv: string[]): string {
+  const promptIndex = argv.indexOf("-p");
+  expect(promptIndex).toBeGreaterThan(-1);
+  return argv[promptIndex + 1]!;
+}
+
 async function waitForJobState(
   env: NodeJS.ProcessEnv,
   jobId: string,
@@ -109,10 +127,17 @@ describe("rescue command lifecycle", () => {
   test("foreground rescue returns prose, persists the session id, and forwards the rescue command label", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("rescue-foreground");
     const repoRoot = await createGitRepoFixture("rescue-foreground-repo");
+    const kimiHome = await createTestPluginDataRoot("rescue-foreground-kimi-home");
     const invocationPath = path.join(pluginDataRoot, "rescue-foreground.jsonl");
-    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+    const sessionId = "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa";
+    const env = {
+      ...makeMockEnv(pluginDataRoot, "rescue-success", invocationPath),
+      KIMI_CODE_HOME: kimiHome,
+      KIMI_PLUGIN_CC_MOCK_SESSION_ID: sessionId,
+    };
 
     try {
+      const statePath = await seedKimiSession(kimiHome, sessionId, repoRoot);
       const output = await runRescue(
         ["Implement", "the", "requested", "fix"],
         makeContext(repoRoot, env),
@@ -133,15 +158,22 @@ describe("rescue command lifecycle", () => {
         summary: string;
         phase: string | null;
       };
+      const state = JSON.parse(await readFile(statePath, "utf8")) as Record<string, unknown>;
+      const spawnedPrompt = promptFromArgv(invocation.argv);
 
       expect(output).toBe(RESCUE_SUCCESS_OUTPUT);
       expect(status.status).toBe("completed");
       expect(status.summary).toBe("Applied the requested change.");
       expect(status.phase).toBe("done");
-      // Session id was minted by the mock and captured from stderr.
-      expect(status.kimi_session_id).toMatch(
-        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
-      );
+      expect(status.kimi_session_id).toBe(sessionId);
+      expect(spawnedPrompt).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}Implement the requested fix`);
+      expect(state.title).toBe("Kimi Rescue: Implement the requested fix");
+      const store = new JobStore(resolvePluginPaths(env));
+      try {
+        expect(store.getJob(status.job_id)?.prompt_digest).toBe(digestPrompt(spawnedPrompt));
+      } finally {
+        store.close();
+      }
       // The hook gets KIMI_PLUGIN_CC_CMD=rescue so it can call
       // evaluateRescueHookRequest. That env propagation is the only
       // runtime-side signal that selects the rescue policy.
@@ -157,6 +189,7 @@ describe("rescue command lifecycle", () => {
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
     }
   });
 
@@ -177,6 +210,28 @@ describe("rescue command lifecycle", () => {
       const dashRIndex = invocation.argv.indexOf("-r");
       expect(dashRIndex).toBeGreaterThan(-1);
       expect(invocation.argv[dashRIndex + 1]).toBe(firstStatus.kimi_session_id);
+      expect(promptFromArgv(invocation.argv)).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}${RESCUE_CONTINUE_TASK}`);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+    }
+  });
+
+  test("rescue -r prefixes both follow-up tasks and bare continuation prompts", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("rescue-resume-prompts");
+    const repoRoot = await createGitRepoFixture("rescue-resume-prompts-repo");
+    const invocationPath = path.join(pluginDataRoot, "rescue-resume-prompts.jsonl");
+    const env = makeMockEnv(pluginDataRoot, "rescue-success", invocationPath);
+
+    try {
+      await runRescue(["Initial", "task"], makeContext(repoRoot, env));
+      await runRescue(["-r", "Apply", "the", "next", "fix"], makeContext(repoRoot, env));
+      let invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
+      expect(promptFromArgv(invocation.argv)).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}Apply the next fix`);
+
+      await runRescue(["-r"], makeContext(repoRoot, env));
+      invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
+      expect(promptFromArgv(invocation.argv)).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}${RESCUE_CONTINUE_TASK}`);
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -270,7 +325,7 @@ describe("rescue command lifecycle", () => {
     }
   });
 
-  test("background rescue supports status/result", async () => {
+  test("background rescue supports status/result and safely prefixes /goal-leading tasks", async () => {
     const pluginDataRoot = await createTestPluginDataRoot("rescue-background");
     const repoRoot = await createGitRepoFixture("rescue-background-repo");
     const invocationPath = path.join(pluginDataRoot, "rescue-background.jsonl");
@@ -278,7 +333,7 @@ describe("rescue command lifecycle", () => {
 
     try {
       const startOutput = await runRescue(
-        ["--background", "Do", "the", "work"],
+        ["--background", "/goal", "Do", "the", "work"],
         makeContext(repoRoot, env),
       );
       const jobId = parseStartedJobId(startOutput);
@@ -287,7 +342,7 @@ describe("rescue command lifecycle", () => {
       ) as { status: string; summary: string; phase: string | null };
 
       expect(["running", "completed"]).toContain(runningStatus.status);
-      expect(runningStatus.summary).toBe("Do the work");
+      expect(runningStatus.summary).toBe("/goal Do the work");
 
       const completed = await waitForTerminalJob(
         () => new JobStore(resolvePluginPaths(env)),
@@ -295,11 +350,15 @@ describe("rescue command lifecycle", () => {
         10_000,
       );
       const resultOutput = await runResult([jobId], makeContext(repoRoot, env));
+      const invocation = JSON.parse(await readFile(invocationPath, "utf8")) as { argv: string[] };
+      const spawnedPrompt = promptFromArgv(invocation.argv);
 
       expect(completed.status).toBe("completed");
       expect(completed.summary).toBe("Applied the requested change.");
       expect(completed.phase).toBe("done");
       expect(resultOutput).toBe(RESCUE_SUCCESS_OUTPUT);
+      expect(spawnedPrompt).toBe(`${EXPECTED_RESCUE_PROMPT_PREFIX}/goal Do the work`);
+      expect(spawnedPrompt.startsWith("/goal")).toBe(false);
     } finally {
       await cleanupTestPath(pluginDataRoot);
       await cleanupTestPath(repoRoot);
@@ -373,3 +432,16 @@ describe("rescue command lifecycle", () => {
     }
   });
 });
+
+async function seedKimiSession(kimiHome: string, sessionId: string, workDir: string): Promise<string> {
+  const sessionDir = path.join(kimiHome, "sessions", "wd_repo_123", sessionId);
+  await mkdir(sessionDir, { recursive: true });
+  await writeFile(
+    path.join(kimiHome, "session_index.jsonl"),
+    `${JSON.stringify({ sessionId, sessionDir, workDir })}\n`,
+    "utf8",
+  );
+  const statePath = path.join(sessionDir, "state.json");
+  await writeFile(statePath, `${JSON.stringify({ title: "New Session", isCustomTitle: false }, null, 2)}\n`, "utf8");
+  return statePath;
+}

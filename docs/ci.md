@@ -25,7 +25,7 @@ The real-binary smoke suite skips unless explicitly enabled. A successful base C
 
 ## Live smoke coverage
 
-[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.1.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
+[smoke.yml](../.github/workflows/smoke.yml) runs only by manual dispatch. Its default CLI version is `2.3.1`. It has no recurring schedule and skips model calls if `KIMI_MODEL_API_KEY` is absent.
 
 The suite checks:
 
@@ -72,9 +72,16 @@ The seed directory is empty and can be removed afterward. Choose provider type a
 service-account vault and resolve it only for the smoke process:
 
 ```sh
-# ~/.secrets.agent.op maps KIMI_MODEL_API_KEY to the vault item (by UUID) and sets the
-# non-secret KIMI_MODEL_NAME / KIMI_MODEL_PROVIDER_TYPE / KIMI_MODEL_BASE_URL for the key's endpoint.
-KIMI_PLUGIN_CC_SMOKE_HOME=$(mktemp -d) op-agent run --env-file ~/.secrets.agent.op -- bun run smoke:real
+# ~/.secrets.agent.op maps KIMI_CODE_API_KEY to the vault item (by UUID).
+# Adapt it to the CLI's env-model channel with the documented coding endpoint.
+op-agent run --env-file ~/.secrets.agent.op -- bash -c '
+  export KIMI_MODEL_API_KEY="$KIMI_CODE_API_KEY"
+  export KIMI_MODEL_NAME="kimi-for-coding"
+  export KIMI_MODEL_PROVIDER_TYPE="kimi"
+  export KIMI_MODEL_BASE_URL="https://api.kimi.com/coding/v1"
+  export KIMI_PLUGIN_CC_SMOKE_HOME="$(mktemp -d)"
+  bun run smoke:real
+'
 ```
 
 This never touches the operator's subscription login, so the token-rotation hazard above cannot occur. It
@@ -89,7 +96,7 @@ SMOKE_BIN_DIR=$(mktemp -d)
 (
   cd "$SMOKE_BIN_DIR"
   printf '%s\n' '{"name":"kimi-smoke","private":true}' > package.json
-  bun add @moonshot-ai/kimi-code@2.1.1
+  npm install --no-package-lock --no-save @moonshot-ai/kimi-code@2.3.1
 )
 KIMI_PLUGIN_CC_KIMI_BIN="$SMOKE_BIN_DIR/node_modules/.bin/kimi" bun run smoke:real
 ```

@@ -145,6 +145,29 @@ describe("ephemeral worktree lifecycle", () => {
     await removeWorktree(repo, wt);
   });
 
+  test("capture fails explicitly when intent-to-add fails instead of returning a smaller patch", async () => {
+    await initRepoWithCommit();
+    const fakeBin = path.join(root, "fake-bin");
+    await mkdir(fakeBin, { recursive: true });
+    const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+    await writeFile(
+      path.join(fakeBin, "git"),
+      `#!/bin/sh\nif [ "$1" = "add" ] && [ "$2" = "-N" ]; then echo "intent-to-add blocked" >&2; exit 1; fi\nexec ${JSON.stringify(realGit)} "$@"\n`,
+      { mode: 0o755 },
+    );
+    const previousPath = process.env.PATH;
+    try {
+      process.env.PATH = `${fakeBin}:${previousPath ?? ""}`;
+      await expect(captureWorktreePatch(repo)).rejects.toMatchObject({
+        code: "GIT_WORKTREE_INTENT_TO_ADD_FAILED",
+        stage: "swarm.worktree",
+      });
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+    }
+  });
+
   test("createEphemeralWorktree throws GIT_WORKTREE_ADD_FAILED outside a repo", async () => {
     const wt = path.join(worktrees, "swarm-write-job3");
     await expect(createEphemeralWorktree(root, "HEAD", wt)).rejects.toThrow();

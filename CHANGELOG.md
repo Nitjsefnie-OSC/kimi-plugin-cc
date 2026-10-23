@@ -2,6 +2,14 @@
 
 > **Post-1.0 release history (v1.0.1 -> present) lives in [ROADMAP-TO-GA.md § Post-GA audit log](./ROADMAP-TO-GA.md#post-ga-audit-log)** and the "Version" / "Upstream compat" lines of [AGENTS.md](./AGENTS.md). Docs-only kimi-code compat checkups that don't bump the plugin version (e.g. the 0.14.2 / 0.14.3 patches) are recorded there, not here. Notable releases are summarized below; the GA entry and full pre-GA detail follow.
 
+## 2.3.1 — 2026-10-23
+
+- Certify exact kimi-code 2.3.1 for all eight native-v2 operations after the source scan, plan-ON/OFF controls and full 15-test candidate smoke. Preserve the no-plan construction and document the new session-lock, internal-`ps`/PATH and legacy-trust-migration residuals. See [evidence](docs/upstream-2.3.1-certification.md).
+- Give Kimi clearer operation-specific contracts: evidence-backed ask/review/challenge responses, complete rescue implementation and verification, honest pursue budgets, and a host-neutral, evidence-only review gate. Keep raw task text in job summaries and fallback titles while the full prompt drives execution and recovery.
+- Include untracked files in working-tree reviews, keep `--base` snapshots isolated from dirty files, and make truncated-diff coverage explicit. Pursue now uses `/goal --` and enforces the 4000-character objective budget including injected guidance; swarm prompts distinguish soft total counts, hard concurrency and prompt-only coordination.
+- Remove roughly 2,300 lines of stale or duplicated release archaeology from production comments while retaining current safety invariants. Capture the durable prompt, scope, comment-hygiene and release rules in `AGENTS.md`, `CONTRIBUTING.md` and the compatibility docs.
+- Make missing-session-ID warnings distinguish resume from replay, and fail write-swarm patch capture explicitly when intent-to-add fails instead of silently omitting new files. Capture failures now fail the job and retain the worktree for recovery; successful runs preserve the `[swarm-write]` summary prefix.
+
 ## 2.2.2 — 2026-10-22
 
 - Certify exact kimi-code 2.3.0 for all eight native-v2 operations after its

@@ -1,6 +1,6 @@
 ---
 name: kimi-review
-description: Use this agent when Claude wants an independent second-pair-of-eyes review from Kimi over a working-tree diff or branch diff. Choose this agent for read-only diff review — multi-file changes, design-risk changes, or when the user explicitly asks for another reviewer. Not for implementation work (see kimi-rescue) or free-form Q&A (see kimi-ask).
+description: Use this agent when the user or main thread wants an independent second-pair-of-eyes review from Kimi over working-tree changes, including untracked files listed by `git status`, or a branch diff. Choose this agent for read-only change review — multi-file changes, design-risk changes, or when the user explicitly asks for another reviewer. Not for implementation work (see kimi-rescue) or free-form Q&A (see kimi-ask).
 model: sonnet
 tools: Bash
 color: cyan
@@ -16,7 +16,7 @@ Why this triggers: The user is explicitly asking for a second reviewer from Kimi
 </example>
 
 <example>
-Context: The main Claude thread just finished a multi-file refactor and the user says, "Does this hold up?"
+Context: The main thread just finished a multi-file refactor and the user says, "Does this hold up?"
 Why this triggers: Multi-file, risk-bearing change where a cross-model reviewer adds value over another pass from the same thread.
 </example>
 
@@ -46,7 +46,7 @@ When invoked:
 - call the shared companion runtime with one Bash invocation after any model-discovery step: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh review <args>`
 - if the companion reports `REVIEW_HOOK_NOT_INSTALLED`, surface the refusal and tell the user to run `/kimi:setup`; do not reach for `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`
 - the companion accepts a **strict allowlist** of flags: `--thinking <off|low|medium|high>` (requested per run), `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`. Everything else is trailing focus text — a short scope hint, not a content channel. Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). `--no-thinking` is rejected; use `--thinking off`
-- do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — review's payload is the git diff, not arbitrary file content
+- do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — review's payload is the git diff plus untracked files listed by `git status` for working-tree reviews, or only the branch/commit diff with `--base` — not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge
 - if the user wants fire-and-forget behavior on a long review (multi-file diff, unclear scope), detach the Bash call itself with `run_in_background: true` instead of reaching for a companion flag; after launching, tell the user to check `/kimi:status` for progress
 - `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.

@@ -1,15 +1,7 @@
 import { RuntimeError } from "./errors.js";
 /**
- * Tokens like `--foo` or `-x` that aren't in a command's known-flags set are
- * almost certainly typos (e.g. `--from HEAD~2` instead of `--base HEAD~2`)
- * or — for agent-mediated callers — hallucinated flag names (e.g. wrappers
- * inventing `--file` / `--context` because that shape is common in other
- * CLIs). The historical behavior — silently treating them as free-form
- * trailing prompt/focus text with an advisory stderr warning — produced
- * misleading runs (Kimi chewing on a bloated blob, or hitting the prompt
- * timeout). All command parsers now hard-fail on unknown flag-shaped tokens
- * while still preserving prose mode after the first non-flag token and the
- * `--` escape.
+ * Unknown flag-shaped tokens hard-fail instead of being absorbed into prose.
+ * Parsing still switches to prose at the first non-flag token or after `--`.
  */
 function looksLikeFlag(token) {
     if (!token.startsWith("-")) {
@@ -39,8 +31,8 @@ export function validateThinkingEffort(value, stage = "args.parse", lowercase = 
 export const PURSUE_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --turns <N>";
 export const SWARM_SUPPORTED_FLAGS = "-m/--model <name>, --thinking <off|low|medium|high>, --budget <30m|1h|90s>, --cap <N>, --max-concurrency <N>, --write";
 /**
- * Parser for /kimi:swarm (read-only parallel fan-out). Foreground-only:
- * no --background/--fresh/--resume. Trailing tokens are the objective.
+ * Parser for /kimi:swarm. Foreground-only: no --background/--fresh/--resume.
+ * Trailing tokens are the objective.
  */
 export function parseSwarmArgs(argv) {
     let model;
@@ -256,7 +248,6 @@ export function parsePursueArgs(argv) {
         objective: trailingTokens?.join(" "),
     };
 }
-/** Help before -- wins even over malformed flags or prose trailing-token mode. */
 const VALUE_TAKING_FLAGS = new Set(["--thinking", "-m", "--model", "--budget", "--resume", "--base", "--cap", "--max-concurrency", "--turns", "--type"]);
 /**
  * `--help` / `-h` counts only inside the leading flag region: before `--`
@@ -565,11 +556,6 @@ function parseKnownFlags(argv, knownFlags, commandName) {
         }
         if (!knownFlags.has(token)) {
             if (looksLikeFlag(token)) {
-                // Wrapper agents routinely hallucinate flags like `--file` /
-                // `--context` because that shape is common in other CLIs. Silently
-                // slurping them into focus text produced a bloated prompt that
-                // looked like a hang. Hard-fail with the supported list inline so
-                // the error message itself is the correction.
                 throw new RuntimeError("INVALID_ARGS", `Unknown flag ${token} for ${commandName}. Supported flags: ${REVIEW_SUPPORTED_FLAGS}. Use \`--\` before flag-shaped focus text to pass it through.`, "args.parse");
             }
             trailingTokens = argv.slice(index);

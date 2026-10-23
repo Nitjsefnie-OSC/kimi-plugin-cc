@@ -4,37 +4,11 @@ import path from "node:path";
 import { parse } from "./vendor/shell-quote/index.js";
 import type { HookDecision } from "./hooks/approval-policy.js";
 
-// v1.0 cutover note (PR 3):
-//
-//   The v0.4 entrypoint, `createRescueApprovalPolicy`, took
-//   ApprovalRequestPayload values from the wire JSON-RPC channel and
-//   returned approval policies for ApprovalDispatcher. Both of those
-//   types lived in `runtime/wire/` which PR 4 deletes.
-//
-//   The v1.0 entrypoint, `evaluateRescueHookRequest`, takes the
-//   PreToolUse hook shape (toolName + raw toolInput from kimi-code's
-//   hook stdin) and returns a `HookDecision`. All the security helpers
-//   below are unchanged from v0.4 — `checkApprovedPath`,
-//   `validateShellCommand`, `validateShellStage`, `hasUnsafeShellSyntax`,
-//   `hasMutatingFlag`, `validatePackageManagerCommand`, plus the
-//   constant tables — kept verbatim so the bug-history reasoning that
-//   went into them (e.g. git pre-subcommand flags, sed `-i.bak`,
-//   shell-quote pipeline parsing) doesn't have to be re-derived. The
-//   thin dispatcher at the top translates between the two surfaces.
-
-// Flags that direct a command to write its output to a file. Audit
-// report 28 (Codex M2) found that `git diff --output=secret.txt` slipped
-// through the allowlist: the path argument bypasses rescue's
-// workspace-bound file-edit check because the write happens via the
-// tool's own --output semantics, not via shell redirection. Treating
-// these as mutating closes that class (git diff, jq, dot, curl, openssl,
-// many compilers — anything that advertises `--output=PATH`).
-//
-// `-o` short form is intentionally NOT blanket-banned: too many
-// read-only commands use it for non-file purposes (rg -o, awk -o,
-// grep --only-matching aliases). The space-separated `--output PATH`
-// two-arg form is implicitly rejected because the scanner doesn't pair
-// args — `--output` exact match below catches the flag itself.
+// Tool-owned output flags write without shell redirection and therefore bypass
+// path checks unless treated as mutating. The `-o` short form is not banned
+// globally because tools such as rg and grep use it for read-only behavior;
+// per-tool checks handle it. Exact `--output` also rejects the two-argument
+// form because this scanner intentionally does not pair arguments.
 const MUTATING_FLAGS_EXACT = new Set([
   "--fix",
   "--write",
@@ -57,16 +31,10 @@ const MUTATING_FLAG_PREFIXES = [
   "--output-directory=",
   "--output-dir=",
 ];
-// Flags whose VALUE is executed as a command or external tool (RCE class).
-// Whole-repo audit 2026-05-28 (report 43) found that allowlisted commands
-// were trusted with arbitrary flags. No allowlisted read-only command uses
-// these legitimately, so they are rejected for EVERY tool:
-//   - `git grep --open-files-in-pager=touch /tmp/x needle` → git runs `touch`
-//     (F1, CRITICAL — same pager-smuggling class as the pre-subcommand
-//     `git -c core.pager=` defense, but via a subcommand flag)
-//   - `go vet -vettool=<bin>`, `go test -exec <bin>` / `-toolexec <bin>` → runs <bin>
-// The git `-O` short form of --open-files-in-pager is handled in the git
-// branch (it collides with `find -O<level>`, so it can't be banned globally).
+// Flags whose VALUE is executed as a command or external tool are rejected for
+// every tool: Git pager overrides and Go -vettool/-exec/-toolexec are direct
+// command-execution escapes. Git's -O short form is handled in its own branch
+// because it collides with find's read-only -O<level> syntax.
 const EXEC_DELEGATING_FLAGS_EXACT = new Set([
   "--open-files-in-pager",
   "-vettool",
@@ -75,9 +43,8 @@ const EXEC_DELEGATING_FLAGS_EXACT = new Set([
   "--toolexec",
   "-exec",
   "-execdir",
-  // `rg --pre <CMD>` runs CMD as a per-file preprocessor (RCE); `rg --hostname-bin
-  // <CMD>` runs CMD to resolve the hostname; `sort --compress-program <CMD>` execs
-  // CMD to (de)compress spill files (RCE on GNU sort). Verified 2026-07-17.
+  // rg --pre/--hostname-bin and GNU sort --compress-program also execute their
+  // values as commands.
   "--pre",
   "--hostname-bin",
   "--compress-program",
@@ -92,10 +59,9 @@ const EXEC_DELEGATING_FLAG_PREFIXES = [
   "--hostname-bin=",
   "--compress-program=",
 ];
-// Pytest/python -m pytest report flags write to arbitrary paths. Test
-// runners execute repo code by design (documented trust boundary, report 43
-// F4); this only stops them writing OUTSIDE the workspace. pytest parses argv
-// with argparse (allow_abbrev), so match these as abbreviation-aware prefixes.
+// Pytest report flags write to arbitrary paths. Test runners execute repo code
+// by design, so these checks block known runner-owned report outputs rather
+// than every possible write. Match argparse allow_abbrev prefixes as well.
 const PYTEST_REPORT_FLAGS = [
   "--junitxml",
   "--junit-xml",
@@ -119,7 +85,7 @@ const BANNED_FIND_ACTIONS = new Set([
 ]);
 
 // Per-tool flags that write to an arbitrary path even in the tool's read/check
-// mode (verified 2026-07-17). Each takes a path value (space- or =-separated);
+// mode. Each takes a path value (space- or =-separated);
 // `hasFlagFromSet` matches both spellings.
 const GO_WRITE_FLAGS = new Set([
   "-coverprofile",
@@ -133,7 +99,7 @@ const GO_WRITE_FLAGS = new Set([
 const CARGO_WRITE_FLAGS = new Set(["--target-dir", "--out-dir"]);
 // tsc matches option names case-INSENSITIVELY (the compiler lowercases them via
 // optionsNameMap), so `--outdir` == `--outDir`. Stored lowercase; matched
-// against lowercased arg names (Opus review 2026-07-17).
+// against lowercased arg names.
 const TSC_WRITE_FLAGS_LC = new Set([
   "--generatecpuprofile",
   "--generatetrace",
@@ -145,26 +111,23 @@ const TSC_WRITE_FLAGS_LC = new Set([
 ]);
 // ruff --config accepts an inline `key=value` override (`--config 'fix=true'`
 // flips ruff into file-rewriting mode) or an arbitrary config path — reject it
-// alongside the direct write flags (Fable review 2026-07-17).
+// alongside the direct write flags.
 const RUFF_WRITE_FLAGS = new Set(["--add-noqa", "--fix-only", "--cache-dir", "--output-file", "--config"]);
 const ESLINT_WRITE_FLAGS = new Set(["--cache-location", "--output-file"]);
-// eslint LOADS AND EXECUTES the module these point at (a custom parser, a rules
-// directory, or the plugin-resolution root) — an arbitrary path is a code-exec
-// escape from the "linters run repo code" boundary. A reviewer uses the
-// project's eslintrc, not these CLI flags (Fable review 2026-07-17).
+// ESLint loads and executes the module named by these flags, so an arbitrary
+// parser/rules/plugin path is a code-execution escape. Normal linting uses the
+// project's own config instead of these overrides.
 const ESLINT_CODELOAD_FLAGS = new Set(["--parser", "--rulesdir", "--resolve-plugins-relative-to"]);
 
-// mypy runs no repo code, but writes reports/cache to arbitrary paths and can
-// pip-install. mypy uses argparse (allow_abbrev), so ANY unambiguous prefix of
-// these resolves (`--jun`→--junit-xml, `--html-rep`→--html-report,
-// `--cache-di`→--cache-dir); matched abbreviation-aware, not exact.
+// By default mypy does not execute repo code, but config plugins are imported
+// (the --config-file exception denied below). Reports/cache can target arbitrary
+// paths and --install-types runs pip. Match argparse allow_abbrev prefixes.
 const MYPY_WRITE_FLAGS_ABBREV = [
   "--junit-xml",
   "--cache-dir",
   "--install-types",
-  // A mypy config file can set `plugins = /path/to/plugin.py`, which mypy
-  // IMPORTS (executes) — an arbitrary `--config-file` is a code-exec escape
-  // (Fable review 2026-07-17). A reviewer uses the workspace mypy.ini.
+  // A mypy config file can import plugins, so an arbitrary --config-file is a
+  // code-execution escape; normal checks use the workspace mypy.ini.
   "--config-file",
   "--any-exprs-report",
   "--cobertura-xml-report",
@@ -211,9 +174,8 @@ function matchesAbbreviatedFlag(args: string[], flags: readonly string[]): boole
 }
 
 /**
- * Read-only tools that bypass the rescue allowlist entirely. Mirrors
- * the broader `READ_ONLY_TOOLS` in approval-policy.ts plus rescue's
- * historical "no harm done" defaults.
+ * Direct-read bypass for rescue. Keep this set identical to READ_ONLY_TOOLS in
+ * approval-policy.ts; the deliberate duplication must be updated in both places.
  */
 const RESCUE_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
   "Read",
@@ -227,17 +189,9 @@ const RESCUE_READ_ONLY_TOOLS: ReadonlySet<string> = new Set([
 /**
  * Evaluate a PreToolUse hook request under the rescue policy.
  *
- * Replaces the v0.4 `createRescueApprovalPolicy` factory. The new entry
- * is a single async function so the hook script can call it directly
- * without juggling a factory + a closure.
- *
- * Inputs come from kimi-code's hook stdin:
- *   - `workspaceRoot`: the plugin-owned trusted root — the per-spawn
- *     `KIMI_PLUGIN_CC_WORKSPACE_ROOT` the hook entry passes through, NEVER the
- *     hook payload's top-level `cwd` (at kimi-code 0.42.0 that field is the
- *     process cwd, and the model cannot forge an env var on its own process)
- *   - `toolName`: e.g. `Bash`, `Write`, `Edit`, `MultiEdit`, etc.
- *   - `toolInput`: the raw arguments kimi will pass to the tool
+ * `workspaceRoot` is the plugin-owned KIMI_PLUGIN_CC_WORKSPACE_ROOT passed by
+ * the hook entry, never the payload cwd; the model cannot forge that per-spawn
+ * environment value. `toolName` and `toolInput` are the raw upstream tool call.
  */
 export async function evaluateRescueHookRequest(
   workspaceRoot: string,
@@ -345,14 +299,8 @@ function extractBashCommand(toolInput: unknown): string | null {
 
 function extractFilePath(toolInput: unknown): string | null {
   if (!isObject(toolInput)) return null;
-  // kimi-code's Write/Edit tools name the path field `path`
-  // (packages/agent-core/src/tools/builtin/file/{write,edit}.ts:
-  // z.object({ path: ... })) — NOT `file_path` (the Anthropic/Claude Code
-  // convention). The original `file_path`-only read meant EVERY real Write/Edit
-  // was denied with "no path field" (fail-closed but broken) for rescue/pursue/
-  // swarm-write — invisible to the unit tests, which all mock `file_path`, and
-  // only caught once the write-swarm real-binary smoke landed (v1.4.1). Prefer
-  // the kimi-code key; accept `file_path` too for forward/backward compat.
+  // kimi-code Write/Edit/MultiEdit call this field `path`, not Claude Code's
+  // `file_path`. Prefer the native key and accept the alias for compatibility.
   const candidate = toolInput.path ?? toolInput.file_path;
   return typeof candidate === "string" && candidate.length > 0 ? candidate : null;
 }
@@ -361,25 +309,13 @@ function isObject(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-// ---------------------------------------------------------------------
-// Internal helpers — verbatim from v0.4 rescue-approval.ts. The bug
-// history that motivates each subtle check (e.g. git pre-subcommand
-// flags, sed -i.bak suffix, shell-quote pipeline collapse, .git
-// containment check) is documented inline and must NOT be removed.
-// ---------------------------------------------------------------------
-
 /**
- * TOCTOU note: this check runs at hook time, BEFORE kimi-code actually
- * writes the file. Between our allow decision and the write, an
- * attacker with workspace write access could swap the path with a
- * symlink that escapes the workspace. v0.4 had the same window (the
- * wire approval policy fired at the same point in time). Closing the
- * window would require either an open-by-fd dance under kimi-code's
- * Write tool (not available) or a recheck immediately before the
- * write (also unavailable to plugin code). The practical mitigation
- * is to trust the workspace's existing write controls — anything
- * able to swap a symlink can already mutate workspace files directly,
- * and rescue is intentionally write-capable.
+ * TOCTOU residual: this check runs before kimi-code writes. An attacker with
+ * workspace write access could replace the approved path with an escaping
+ * symlink before that write. The plugin cannot open-by-fd or recheck inside the
+ * Write tool, so the explicit trust boundary is the workspace's existing write
+ * controls: such an attacker can already mutate workspace files directly, and
+ * rescue is intentionally write-capable.
  */
 export async function checkApprovedPath(
   workspaceRoot: string,
@@ -537,10 +473,9 @@ export function validateShellStage(
         reason: `Rescue rejects git pre-subcommand flags (e.g. -c/-C/-p/--no-pager/--exec-path): ${tokens.join(" ")}. Put the read-only subcommand immediately after \`git\`.`,
       };
     }
-    // `git grep -O[<cmd>]` / `--open-files-in-pager[=<cmd>]` runs <cmd> as the
-    // pager (report 43 F1, CRITICAL RCE). The long form is caught by the
-    // global exec-delegating check above; the `-O` short form collides with
-    // `find -O<level>` so it is rejected here, git-locally.
+    // git grep -O/--open-files-in-pager executes its pager value. The long form
+    // is caught globally; reject -O here because find uses that spelling for a
+    // read-only optimization level.
     if (args.some((arg) => arg === "-O" || /^-O./.test(arg))) {
       return {
         ok: false,
@@ -564,7 +499,7 @@ export function validateShellStage(
   if (command === "tsc") {
     // tsc option names are case-INSENSITIVE (compiler lowercases them), so match
     // lowercased. `--noemit`/`--noEmit` both suppress JS emit; `--outdir` is the
-    // same write flag as `--outDir` (Opus review 2026-07-17).
+    // same write flag as `--outDir`.
     const tscLowerNames = args.map((arg) => {
       const eq = arg.indexOf("=");
       return (eq === -1 ? arg : arg.slice(0, eq)).toLowerCase();
@@ -573,7 +508,7 @@ export function validateShellStage(
       return { ok: false, reason: "Rescue allows tsc only with --noEmit." };
     }
     // --noEmit suppresses JS emit but NOT the profile/trace/buildinfo/declaration
-    // writers, which write to arbitrary paths (verified 2026-07-17).
+    // writers, which write to arbitrary paths.
     if (tscLowerNames.some((name) => TSC_WRITE_FLAGS_LC.has(name))) {
       return {
         ok: false,
@@ -587,9 +522,8 @@ export function validateShellStage(
     if (args[0] !== "check") {
       return { ok: false, reason: "Rescue allows biome only in check mode." };
     }
-    // biome check applies fixes with any --apply/--write/--fix variant, incl. the
-    // -unsafe/-only suffixes that dodge the global exact/prefix mutating-flag set
-    // (--apply is caught globally, --apply-unsafe is not). Verified 2026-07-17.
+    // biome check applies fixes for every --apply/--write/--fix variant,
+    // including -unsafe/-only suffixes missed by the global mutating-flag set.
     if (args.some((arg) => /^--(apply|write|fix)/.test(arg))) {
       return {
         ok: false,
@@ -636,7 +570,7 @@ export function validateShellStage(
       return { ok: false, reason: `Rescue rejects cargo subcommand: ${tokens.join(" ")}` };
     }
     // --target-dir/--out-dir redirect the whole artifact tree to an arbitrary
-    // path outside the workspace (verified 2026-07-17).
+    // path outside the workspace.
     if (hasFlagFromSet(args, CARGO_WRITE_FLAGS)) {
       return {
         ok: false,
@@ -650,9 +584,8 @@ export function validateShellStage(
     if (!GO_SUBCOMMANDS.has(args[0] ?? "")) {
       return { ok: false, reason: `Rescue rejects go subcommand: ${tokens.join(" ")}` };
     }
-    // `go build -o PATH` / `go test -c -o PATH` write a binary to an
-    // arbitrary path (report 43 F3). -vettool / -exec / -toolexec are caught
-    // by the global exec-delegating check above.
+    // go build/test -o writes a binary to an arbitrary path. Exec-delegating
+    // -vettool/-exec/-toolexec values are already rejected globally.
     if (hasWriteShortFlag(args)) {
       return {
         ok: false,
@@ -660,7 +593,7 @@ export function validateShellStage(
       };
     }
     // Profile/trace/output-dir flags on `go test`/`go build` write to arbitrary
-    // paths without `-o` (verified 2026-07-17).
+    // paths without `-o`.
     if (hasFlagFromSet(args, GO_WRITE_FLAGS)) {
       return {
         ok: false,
@@ -688,15 +621,11 @@ export function validateShellStage(
   }
 
   if (command === "eslint") {
-    // ESLint's `-o` short form is `--output-file` — writes the lint
-    // report to an arbitrary path. The long form `--output-file=` is
-    // already caught by MUTATING_FLAG_PREFIXES; the short form needs an
-    // eslint-specific check because `-o` is a legitimate read flag in
-    // other tools (e.g. `rg -o` = --only-matching). Audit re-review
-    // (report 34 Codex HIGH) found this gap. `--fix` is also already
-    // in MUTATING_FLAGS_EXACT, so the eslint command surface is now
-    // read-only by construction.
-    // Match `-o` and the joined `-o<path>` spelling (eslint accepts both).
+    // Block ESLint's runner-owned report/cache paths. `-o` and joined
+    // `-o<path>` need a tool-specific check because rg/grep use `-o` read-only;
+    // the long --output-file form is already caught globally. These checks do
+    // not make linting read-only: project config and linter code still execute
+    // within rescue's repository trust boundary.
     if (args.some((arg) => arg === "-o" || /^-o./.test(arg))) {
       return {
         ok: false,
@@ -704,7 +633,7 @@ export function validateShellStage(
       };
     }
     // --output-file (long form) is caught globally; --cache-location writes the
-    // cache tree to an arbitrary path (verified 2026-07-17).
+    // cache tree to an arbitrary path.
     if (hasFlagFromSet(args, ESLINT_WRITE_FLAGS)) {
       return {
         ok: false,
@@ -712,7 +641,7 @@ export function validateShellStage(
       };
     }
     // --parser/--rulesdir/--resolve-plugins-relative-to LOAD AND EXECUTE a module
-    // from the given path (Fable review 2026-07-17) — a code-exec escape.
+    // from the given path — a code-exec escape.
     if (hasFlagFromSet(args, ESLINT_CODELOAD_FLAGS)) {
       return {
         ok: false,
@@ -723,10 +652,9 @@ export function validateShellStage(
   }
 
   if (command === "mypy") {
-    // mypy runs no repo code, but writes reports/cache to arbitrary paths and can
-    // pip-install. Matched abbreviation-aware because argparse allow_abbrev lets
-    // `--jun`→--junit-xml, `--html-rep`→--html-report, `--cache-di`→--cache-dir
-    // (verified 2026-07-17).
+    // By default mypy does not execute repo code, but --config-file can import
+    // plugins and is denied below. Block report/cache/install outputs and their
+    // argparse allow_abbrev prefixes.
     if (matchesAbbreviatedFlag(args, MYPY_WRITE_FLAGS_ABBREV)) {
       return {
         ok: false,
@@ -737,9 +665,8 @@ export function validateShellStage(
   }
 
   if (command === "pytest") {
-    // pytest executes repo code by design (documented trust boundary, report
-    // 43 F4); block only its file-writing report flags so it can't write
-    // outside the workspace.
+    // pytest executes repo code by design. Block its known runner-owned report
+    // flags, not every write that test code itself can perform.
     if (hasPytestReportFlag(args)) {
       return {
         ok: false,
@@ -754,8 +681,8 @@ export function validateShellStage(
   }
 
   if (pipelineMode && PIPELINE_PLUMBING.has(command)) {
-    // `sort -o FILE` writes anywhere (report 43 F2); `uniq IN OUT` writes its
-    // second positional. Piped plumbing reads stdin → it needs neither.
+    // sort -o and uniq's second positional are output writes, unnecessary for
+    // pipeline stages that read stdin.
     if (hasWriteShortFlag(args) || args.includes("--output")) {
       return {
         ok: false,
@@ -795,7 +722,6 @@ export function validateShellStage(
   return { ok: false, reason: `Rescue rejects shell command: ${tokens.join(" ")}` };
 }
 
-/** Thrown by `throwingExpansionEnv` when the parser resolves a real variable. */
 class ShellExpansionError extends Error {}
 
 /**
@@ -818,8 +744,7 @@ function throwingExpansionEnv(key: string): string {
  * smuggled flag from every per-flag check:
  *   - `${VAR:-flag}` collapsed to an empty token (no `:-`-default modelling), and
  *   - `$IFS`-gluing (`rg x$IFS--pre$IFS'sh'` → one token here, but bash splits it
- *     into `rg x --pre sh` — an RCE). The word-boundary regex this replaced
- *     missed the glued form because `$` was preceded by a letter, not whitespace.
+ *     into `rg x --pre sh` — an RCE).
  * A malformed substitution (`${}`, unterminated) throws a plain parser Error;
  * that is itself unsafe to pass through, so any throw ⇒ unsafe (fail closed).
  */
@@ -919,14 +844,11 @@ function scanUnsafeUnquoted(command: string): boolean {
 }
 
 /**
- * Keystone syntax gate — runs BEFORE the per-flag allowlist in
- * `validateShellCommand`. Rejects any shell construct that bash would expand,
- * substitute, or split in a way the vendored shell-quote parser does NOT model,
- * because such a divergence smuggles a flag/command past every downstream check.
- * Two complementary, quote-aware passes: `scanUnsafeUnquoted` (backticks,
- * command/process substitution, `$'…'`/`$"…"` openers, brace expansion) and
- * `hasShellExpansion` (`$VAR`/`${…}` parameter expansion, incl. `$IFS`-gluing and
- * `${VAR:-flag}`). Verified against a bypass + false-positive battery 2026-07-17.
+ * Syntax gate before the per-flag allowlist. Reject the expansion/substitution
+ * classes shell-quote does not model: backticks, command/process substitution,
+ * `$'…'`/`$"…"` openers, brace expansion, and `$VAR`/`${…}` parameter expansion
+ * including `$IFS` gluing and default-value forms. Two complementary quote-aware
+ * passes prevent these forms from smuggling flags or commands downstream.
  */
 export function hasUnsafeShellSyntax(command: string): boolean {
   return scanUnsafeUnquoted(command) || hasShellExpansion(command);
@@ -950,10 +872,7 @@ export function hasMutatingFlag(args: string[]): boolean {
   return false;
 }
 
-/**
- * True if any arg is a flag whose value is executed as a command/tool.
- * Rejected for every command (report 43 F1/F3).
- */
+/** True if any argument delegates execution to a command or external tool. */
 export function hasExecDelegatingFlag(args: string[]): boolean {
   return args.some(
     (arg) =>
@@ -963,11 +882,9 @@ export function hasExecDelegatingFlag(args: string[]): boolean {
 }
 
 /**
- * True if any arg is the bare `-o` short form (`-o`, `-ofile`, `-o=file`),
- * the "write output to file" flag for go / sort / ruff. NOT banned globally:
- * `rg -o` / `grep -o` (--only-matching) are read-only, so this is applied
- * per-tool where `-o` writes a file (report 43 F2/F3/F5). The long
- * `--output*` forms are already covered by MUTATING_FLAG_PREFIXES.
+ * Per-tool check for `-o`, joined `-ofile`, and `-o=file` where that flag writes
+ * output (go, sort, ruff, and ESLint). It is not global because rg/grep use `-o`
+ * for read-only matching. Long --output forms are covered by the mutating set.
  */
 export function hasWriteShortFlag(args: string[]): boolean {
   return args.some((arg) => arg === "-o" || /^-o./.test(arg));
@@ -978,7 +895,7 @@ export function hasWriteShortFlag(args: string[]): boolean {
  * cluster (`-rT DIR`, `-ro FILE`) the plain `-o` check misses. getopt consumes a
  * cluster left to right; the first argument-taking option grabs the rest as its
  * value, so an `o`/`T` AFTER a `-t`/`-k`/`-S` (sort's other arg-taking options)
- * is that option's value, not a write flag. (Opus review 2026-07-17.)
+ * is that option's value, not a write flag.
  */
 function sortShortClusterWrites(token: string): boolean {
   if (token.length < 2 || token[0] !== "-" || token[1] === "-") return false;
@@ -998,15 +915,10 @@ export function validatePackageManagerCommand(
   command: string,
   args: string[],
 ): { ok: true } | { ok: false; reason: string } {
-  // Direct `<pm> test` is the test-runner shorthand. Like `pytest`/`go test`/
-  // `cargo test`, it EXECUTES repo code by design (the package.json "test"
-  // script) — the SAME documented trust boundary (docs/safety.md): a test runner
-  // in a write-capable rescue/pursue run can already run arbitrary repo code, so
-  // rejecting `test` would only cripple the expected surface without adding
-  // safety. `run <arbitrary-script>` below is different: it is a fully general
-  // script executor (dev/deploy/publish), not a test entry point, so it stays
-  // rejected. (Fable review 2026-07-17 flagged the `test`/`run` asymmetry — this
-  // is the deliberate resolution, not an oversight.)
+  // Direct <pm> test executes the repository's test script by design, like
+  // pytest/go test/cargo test, and remains inside the documented test-runner
+  // trust boundary. `run <arbitrary-script>` is instead a general script
+  // executor (dev/deploy/publish), so this deliberate test/run asymmetry stays.
   if (args[0] === "test") {
     return { ok: true };
   }

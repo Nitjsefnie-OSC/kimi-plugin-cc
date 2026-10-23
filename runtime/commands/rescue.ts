@@ -36,19 +36,6 @@ import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js
 
 export { describeMissingResult } from "../background-spawn.js";
 
-// v1.0 cutover note (PR 3):
-//
-//   Rescue is the only write-capable command. v0.4 enforced safety
-//   in-band via `WireClient.approvalPolicy = createRescueApprovalPolicy(cwd)`,
-//   which called back into our runtime on every kimi-side approval
-//   request. v1.0 moves that enforcement into the PreToolUse hook
-//   (`runtime/hooks/approval-hook.ts`), which spawns under kimi-code
-//   and calls `evaluateRescueHookRequest` for `KIMI_PLUGIN_CC_CMD=rescue`
-//   tool calls. The runtime side now just sets the env var and lets
-//   the hook gate everything.
-//
-//   The security helpers in `runtime/rescue-approval.ts` are unchanged.
-
 // "Continue working on the bug" verbs that auto-attach to the latest
 // rescue session. Documented UX trap: a prompt matching this pattern
 // will resume the most recent rescue session regardless of whether
@@ -57,9 +44,18 @@ export { describeMissingResult } from "../background-spawn.js";
 const AUTO_RESUME_PATTERN = /\b(continue|resume|keep going|keep working|apply the top fix|dig deeper)\b/i;
 const RESCUE_SUMMARY_MAX = 120;
 const RESCUE_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
-// Rescue runs multi-step apply/test/verify loops with model-configured thinking by
-// default — uses the longest budget. See KIMI_RESCUE_PROMPT_TIMEOUT_MS
-// in kimi-timeouts.ts for the rationale on the 1800s value.
+const RESCUE_CONTINUE_TASK = "Continue the previous rescue task using the latest repository state.";
+const RESCUE_PROMPT_PREFIX = [
+  "Follow repository instructions and inspect the current state before editing.",
+  "Implement the smallest complete change that satisfies the task instead of stopping at a plan.",
+  "Do not mutate git state.",
+  "Run proportionate relevant checks, and never claim unrun checks passed.",
+  "Do not narrate progress.",
+  "Finish with a self-contained report of changed files, verification commands and results, and unfinished work or blockers.",
+  "",
+  "Rescue task:",
+  "",
+].join("\n");
 
 interface RescueSessionResolution {
   /** Prior kimi session id to resume; null means start a fresh session. */
@@ -122,7 +118,7 @@ export async function runRescue(argv: string[], context: CommandContext): Promis
       ...persistedExecutionPlanFields(executionPlan),
       agent_profile: RESCUE_AGENT_PROFILE_PLACEHOLDER,
       prompt_digest: digestPrompt(prompt),
-      summary: shorten(prompt, RESCUE_SUMMARY_MAX),
+      summary: shorten(stripRescuePromptPrefix(prompt), RESCUE_SUMMARY_MAX),
       phase: parsed.background ? "queued" : "starting",
       final_output_path: null,
       stream_log_path: logPath,
@@ -264,8 +260,6 @@ export async function executeRescueJob(
         resumeSessionId: job.kimi_session_id ?? undefined,
         logPath: job.stream_log_path,
         signal: handlers.signal,
-        // SIGKILL escalation defaults to 1500ms inside cli-client —
-        // matches v0.4's cancellation.ts behavior for the wire client.
       },
       job.budget_ms ?? KIMI_RESCUE_PROMPT_TIMEOUT_MS,
       "rescue.prompt",
@@ -288,8 +282,7 @@ export async function executeRescueJob(
       result.sessionId !== undefined &&
       result.sessionId.length > 0
     ) {
-      // length>0 guard: empty-string capture would poison the row. (Kimi
-      // alpha.4 challenge finding #3.)
+      // Never persist an empty ID because NULL represents a missing session ID.
       store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
@@ -297,7 +290,7 @@ export async function executeRescueJob(
       env: context.env,
       cwd: job.cwd,
       sessionId: result.sessionId ?? job.kimi_session_id,
-      title: buildKimiSessionTitle("rescue", prompt),
+      title: buildKimiSessionTitle("rescue", stripRescuePromptPrefix(prompt)),
       stderr: context.stderr,
     });
     if (job.kimi_session_id === null) {
@@ -381,14 +374,18 @@ export async function executeRescueJob(
 
 function buildRescuePrompt(prompt: string | undefined, reusedSession: boolean): string {
   if (prompt?.trim()) {
-    return prompt.trim();
+    return RESCUE_PROMPT_PREFIX + prompt.trim();
   }
 
   if (reusedSession) {
-    return "Continue the previous rescue task using the latest repository state.";
+    return RESCUE_PROMPT_PREFIX + RESCUE_CONTINUE_TASK;
   }
 
   throw new RuntimeError("INVALID_ARGS", "rescue requires a task description.", "rescue.parse");
+}
+
+function stripRescuePromptPrefix(prompt: string): string {
+  return prompt.startsWith(RESCUE_PROMPT_PREFIX) ? prompt.slice(RESCUE_PROMPT_PREFIX.length) : prompt;
 }
 
 async function resolveRescueSession(

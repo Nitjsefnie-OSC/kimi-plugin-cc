@@ -15,24 +15,16 @@ const companionEntrypoint = fileURLToPath(new URL(isCompiledRuntime ? "./compani
 const companionProjectRoot = path.resolve(path.dirname(companionEntrypoint), "..");
 const FAILURE_PERSIST_RETRY_DELAYS_MS = [100, 200, 400];
 export async function startBackgroundJob(job, prompt, context, paths, options) {
-    // MUST be the same resolution the hook verifier uses. The worker re-verifies
-    // the hook (rescue.ts / ask.ts, deliberately, so a background job cannot
-    // outlive or bypass the check), and the verifier rebuilds the canonical
-    // command from ITS OWN `process.argv0`. Spawning with a different spelling of
-    // node than setup pinned makes the worker compute a different expected
-    // command than the config holds → byte-exact mismatch → every background
-    // rescue/ask refuses forever, with `/kimi:setup` unable to converge the two
-    // sides (setup runs via companion.sh, whose argv0 is the stable symlink).
+    // Background spawn and hook verification must resolve the same stable Node
+    // path: the worker re-verifies the byte-exact hook command from its own
+    // runtime path, so a different spelling than setup pinned fails closed. For
+    // example, spawn(process.execPath) can resolve …/Cellar/node/<ver>/bin/node
+    // while setup pinned /opt/homebrew/bin/node.
     //
-    // Concretely: `spawn(process.execPath)` gives the child an argv0 equal to the
-    // fully symlink-resolved path (…/Cellar/node/<ver>/bin/node), whereas setup
-    // pins /opt/homebrew/bin/node. Caught by Kimi's pre-release review of v1.9.0.
-    // NOTE: this is deliberately NOT `resolveNodeBinary`, which additionally
-    // REQUIRES an absolute override because the hook command runs under
-    // `/bin/sh -c` with a possibly sanitized PATH. Spawning has no such
-    // constraint — a bare name is resolved by spawn() via PATH — so the override
-    // is honored verbatim here. Only the no-override default needs to change:
-    // it must match what the verifier computes, hence `preferStableNodePath`.
+    // An explicit spawn override need not be absolute because spawn() resolves
+    // bare names through PATH. The hook command separately requires an absolute
+    // override because /bin/sh -c may have a sanitized PATH. Only the no-override
+    // default uses preferStableNodePath to match the verifier.
     const override = context.env.KIMI_PLUGIN_CC_NODE_BIN;
     const nodeBinary = override !== undefined && override.length > 0
         ? override

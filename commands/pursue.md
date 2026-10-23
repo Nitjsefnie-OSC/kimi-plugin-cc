@@ -15,7 +15,7 @@ Supported flags:
 - `--thinking <off|low|medium|high>` (also `--thinking=<effort>`) — request effort for this process; other model-supported effort tokens pass through. `--no-thinking` is rejected; use `--thinking off`.
 
 - `--budget <duration>` — HARD wall-clock ceiling (e.g. `30m`, `1h`, `90s`; bare number = minutes). Default 45m. This is the only guaranteed bound on an autonomous run.
-- `--turns <N>` — SOFT cap: injected into the objective as a model instruction to call `SetGoalBudget`. Advisory, not enforced.
+- `--turns <N>` — SOFT instruction injected into the objective to stop after at most N turns; it never requests the denied `SetGoalBudget` tool. Advisory, not enforced; a soft stop is not proof the objective is complete. The plugin's `--budget` wall-clock ceiling remains the hard bound.
 - `-m`, `--model <name>`
 
 Prototype limitations (experimental):

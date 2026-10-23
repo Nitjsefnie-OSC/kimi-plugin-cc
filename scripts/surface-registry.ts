@@ -34,25 +34,25 @@ export interface CodexSkillSpec {
 }
 
 export const CLAUDE_SURFACE_HASHES: readonly ClaudeSurfaceHash[] = [
-  { path: ".claude-plugin/plugin.json", sha256: "0d316efec9033ca11e367a844e67be123a8b08eb6c21f70dc9d31b32855a9932" },
-  { path: ".claude-plugin/marketplace.json", sha256: "293c1f038d5e8b4cf00aa8d94baf51f435d5112c0ef6b43bbdc253a5f53cae4d" },
-  { path: "commands/README.md", sha256: "e4a76981082aadc5547c90867f03009c3244a1c83f63ff98b31be02ce45fe5db" },
+  { path: ".claude-plugin/plugin.json", sha256: "3f62177191206562e5531c180b0e7767089bf79087ae7ffac4add618b8fc83a7" },
+  { path: ".claude-plugin/marketplace.json", sha256: "0ebf1b7d3d3411569bd2f2b7c7e75fe0e4fbf47de375d5f9431592542d2f6868" },
+  { path: "commands/README.md", sha256: "321e420aa0d71e6c312c7e634c5e9d9e484f28a5ac244483e052c25c1b03bf5e" },
   { path: "commands/ask.md", sha256: "1f4c1c5c012cf8f66981106101b6873ae15de44316ff5135e1438b72450c9956" },
   { path: "commands/cancel.md", sha256: "4d1c1e9d0534fac113fea18e2c8993d99f3ada1335186f66cd995a45f1057db4" },
-  { path: "commands/challenge.md", sha256: "402295b248328a32831976e1caa735ceecc974b5b092e13bcdc9a49e4d7b57d7" },
-  { path: "commands/pursue.md", sha256: "75bdb1d6cb5805e837b70881ef56e0bc0c64a24a135a42e41c3b6e3baef55768" },
+  { path: "commands/challenge.md", sha256: "38682e8ee73af6838ff01dabe589e4a1c70cf3df467e25d8b846a06f8d2fd1b3" },
+  { path: "commands/pursue.md", sha256: "5708ee0e8767de36f0d65abd1871e09c7de97a0d3da41173a735c3be2079dafc" },
   { path: "commands/replay.md", sha256: "84e46faa17b032f43dccb37190e461d1da3f807226f3814a9e5cd302afcf12e3" },
   { path: "commands/rescue.md", sha256: "6f4599c1999bd9d5ad3be7781abb634cbb9e7622901f37e8e844659a8f878800" },
   { path: "commands/result.md", sha256: "d5ae361ea6c95f139e4bf1d2f23cb69e14c23c9e0e2b6e8084274e8245016db5" },
-  { path: "commands/review.md", sha256: "a2011878c4fa394805550a0de80b99d2d4bbe1ffa2c3f3eb50d14d1efbe93919" },
+  { path: "commands/review.md", sha256: "a528a763c643f26ff9a1674c8a6c11dcea59121320d43dd4306ef9f168280604" },
   { path: "commands/setup.md", sha256: "ede6fb64d0a8b9876a2405b3685483d4db5ce9505dd724ad903cdf1b048abc44" },
   { path: "commands/status.md", sha256: "0171276cd08b9fe62893f62523c164f35b1a4df98cb7b04f14f62fc33fbc8cbc" },
   { path: "commands/swarm.md", sha256: "3814bfe2bfa19336429286d1db4645c08209eba46081f36e3874274b5a1e70ad" },
   { path: "agents/kimi-ask.md", sha256: "0d913d25f62cb98dce35022ada3215982828eba180b9f1e9780b2ca78116d595" },
-  { path: "agents/kimi-challenge.md", sha256: "48e70feedd8dc7ceace99b96d8e30e06ca3a52e766fef1d8ab74a9b6f33c69b3" },
-  { path: "agents/kimi-pursue.md", sha256: "3acea06fa9e4077530080280574f95c76f26b6d4b7607b8fdcc44c8035e36529" },
-  { path: "agents/kimi-rescue.md", sha256: "f9e793d05e44b355fde0c0f93fa413fd34cb2214f0f322093c4e7226297a6af8" },
-  { path: "agents/kimi-review.md", sha256: "45642852efcf70dfdb860ec2fa68a92ea4c18f94e9408dd27704c603f8516311" },
+  { path: "agents/kimi-challenge.md", sha256: "1bcd0807f770c2f6b0fa0aad4166a6cec9036e6f1c3fb792223e8db8231c3b1b" },
+  { path: "agents/kimi-pursue.md", sha256: "e78747200ad51ddda29af97178308173bc82c945f8283fce74c2531ebc18fd7f" },
+  { path: "agents/kimi-rescue.md", sha256: "4fe17d6522cc7891310679e25a319ab14adf1d69442a447d333232864d05db2d" },
+  { path: "agents/kimi-review.md", sha256: "7134c66158f16e65e82f2d1a9ca1a755cd1d792c297171c60946f0170edbc1f1" },
   { path: "agents/kimi-swarm-write.md", sha256: "05bb84bf12367637eb1d776c9102ae3caac6c148d7cb98565101847ccb5f7cb8" },
   { path: "agents/kimi-swarm.md", sha256: "0a9306c344cc8eac1d504a213c0096884a41203c8a310e4c516986b79de23165" },
 ];
@@ -61,7 +61,7 @@ export const CODEX_PLUGIN_MANIFEST = {
   name: PLUGIN_NAME,
   version: PLUGIN_VERSION,
   description:
-    "Codex plugin that delegates review, challenge, ask, rescue, pursue, and swarm workflows to the local kimi-code CLI through the kimi-plugin-cc companion runtime.",
+    "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, and parallel tasks through the local Kimi Code CLI.",
   author: {
     name: "linxule",
   },
@@ -72,9 +72,9 @@ export const CODEX_PLUGIN_MANIFEST = {
   skills: "./skills/",
   interface: {
     displayName: "Kimi",
-    shortDescription: "Delegate repo work to local kimi-code",
+    shortDescription: "Ask, review, and build with Kimi",
     longDescription:
-      "Shell-only Codex packaging for kimi-plugin-cc. It exposes Codex skills that call the existing companion runtime and local kimi-code subprocess, while preserving the Claude Code plugin surface.",
+      "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime; no MCP server is required.",
     developerName: "linxule",
     category: "Developer Tools",
     capabilities: ["Code Review", "Local Shell", "Write"],
@@ -129,7 +129,7 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     command: "ask",
     argumentSummary: "[--budget <30m|1h|90s>] [--background] [--wait] [-r | --resume <id>] [--fresh] [-m <model>] [--thinking <effort>] <prompt>",
     description:
-      "Ask Kimi a read-only free-form question about the current repository. Use for prose explanations, flow tracing, module comparisons, or conceptual reasoning where Codex should delegate the answer to local kimi-code rather than perform implementation.",
+      "Ask Kimi a read-only free-form question about the current repository. Use for prose explanations, flow tracing, module comparisons, or conceptual reasoning when the user wants an independent Kimi answer rather than implementation.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
       "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
@@ -150,12 +150,12 @@ export const CODEX_SKILLS: readonly CodexSkillSpec[] = [
     command: "review",
     argumentSummary: "[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <effort>] [extra prose]",
     description:
-      "Run an independent read-only Kimi review over the current working tree or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits.",
+      "Run an independent read-only Kimi review over the current working tree, including untracked files, or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits.",
     guidance: [
       ...MODEL_SELECTION_GUIDANCE,
       "Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).",
       "Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, and any trailing focus text only.",
-      "Do not invent file/path flags; review's payload is the git diff plus optional focus text.",
+      "Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope.",
       "If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.",
       "Return companion stdout verbatim and leave any fixes to a separate user request.",
     ],

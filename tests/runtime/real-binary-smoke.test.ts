@@ -850,7 +850,7 @@ const SWARM_FILES = [
   "swarm-confinement-probe-2.txt",
 ] as const;
 // Adversarial prompt: unlike the production buildSwarmPrompt (which steers
-// subagents to read-only `explore`), this FORCES each subagent to ATTEMPT a
+// subagents to allowed read-only inspection tools), this FORCES each subagent to ATTEMPT a
 // write with a write-capable default profile, so the hook deny path is actually
 // exercised. "report the denial verbatim" maximizes the chance the deny marker
 // propagates up through the subagent summary into the aggregated swarm result.

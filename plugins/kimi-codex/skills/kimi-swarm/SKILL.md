@@ -5,7 +5,7 @@ description: "Run a read-only parallel Kimi review fan-out across many independe
 
 # Kimi Swarm
 
-Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+Forward this request to the local Kimi Code companion runtime by shell. Do not use MCP for this skill.
 
 ## Invocation
 

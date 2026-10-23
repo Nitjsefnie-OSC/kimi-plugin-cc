@@ -1,11 +1,11 @@
 # Native v2 certification and engine-provenance contract
 
 **Approved:** 2026-08-28 · **Amended:** 2026-09-09 (§2 alternate basis, §4 matrix, §5 fields)
-**Current capability (plugin 2.2.2):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0` and `2.3.0` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
+**Current capability (plugin 2.3.1):** native v2 certified at exact kimi-code `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` and `2.3.1` for every operation under the §2 construction; `legacy-v1` remains selectable only for a pinned binary ≤ 0.41.x.
 
 For the dated upstream evidence and follow-up, see [Native v2 status](native-v2-status.md).
 
-Plugin 2.2.2 adds CLI 2.3.0 certification; publication does not update installed hosts. Exact 2.3.0 evidence: [certification record](upstream-2.3.0-certification.md).
+Plugin 2.3.1 adds CLI 2.3.1 certification; publication does not update installed hosts. Exact 2.3.1 evidence: [certification record](upstream-2.3.1-certification.md).
 
 Exact 2.1.0/2.1.1 evidence: [certification record](upstream-2.1-certification.md).
 The known active-plan bypass remains; only the no-plan construction is
@@ -76,13 +76,18 @@ allow. Certification is per exact version (not per minor) and per operation.
 Residual assumptions, accepted explicitly: (i) `<KIMI_CODE_HOME>/config.toml`
 and the session journals are trusted operator state — an actor who can write
 them could already delete the `[[hooks]]` entry, so the check-to-use window
-adds no new trust class. In 2.3.0, print mode can close/resume and retry once
+adds no new trust class. In 2.3.0 and later, print mode can close/resume and retry once
 on `session.stale`, replaying the same wire journals. This is another read of
 trusted state, not an additional plan-state source. Do not concurrently edit
 or operate on a plugin-managed session from another client; the parent cannot
 atomically revalidate in-process reloads. Upstream session locks are not a
-security boundary (publication errors fail open, and stale detection compares
-file lengths); (ii) the upstream hook runner fails open on its own
+security boundary (publication errors fail open, stale detection compares
+file lengths, and 2.3.1 adds ambient lock-disable and explicit takeover paths).
+POSIX lock contention can also execute bare `ps` with inherited PATH and cwd,
+so internal OS helpers are trusted too. Legacy workspace-trust migration in
+2.3.1 recognizes more old path spellings and can enable project MCP for those
+already trusted roots; trust-store read failure can suppress the initial MCP
+load without granting trust; (ii) the upstream hook runner fails open on its own
 internal errors (unchanged from v1); (iii) `writesOnlyPlanFile` compares
 normalized strings without realpath — a symlink at the plan path would need a
 prior hook-allowed write, which the construction denies; (iv) repository Git
@@ -135,7 +140,7 @@ expanded production capability requires a separately authorized release.
 
 | Engine | Operation | Production state |
 |---|---|---|
-| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0` (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
+| `native-v2` | review, challenge, ask, rescue, review_gate, pursue, swarm, swarm-write | certified at exact `0.42.0`, `0.43.0`, `0.43.1`, `2.0.0`, `2.0.1`, `2.0.2`, `2.1.0`, `2.1.1`, `2.2.0`, `2.3.0`, `2.3.1` (`NATIVE_V2_CERTIFIED` in `runtime/kimi-engine.ts`), safety profile `native-v2-no-plan/1` |
 | `legacy-v1` | review, challenge, ask, rescue, review_gate | certified within `KIMI_TESTED_MINORS` (≤ 0.41) for an explicitly pinned binary |
 | `legacy-v1` | pursue / swarm / swarm-write | certified from kimi-code 0.8 / 0.12 / 0.18 within `KIMI_TESTED_MINORS` |
 

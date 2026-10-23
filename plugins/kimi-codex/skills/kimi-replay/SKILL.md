@@ -5,7 +5,7 @@ description: "Re-render a stored event log for a completed plugin-managed Kimi j
 
 # Kimi Replay
 
-Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+Forward this request to the local Kimi Code companion runtime by shell. Do not use MCP for this skill.
 
 ## Invocation
 

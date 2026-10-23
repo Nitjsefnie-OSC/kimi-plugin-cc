@@ -5,7 +5,7 @@ description: "Show the latest or selected plugin-managed Kimi job for the curren
 
 # Kimi Status
 
-Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+Forward this request to the local Kimi Code companion runtime by shell. Do not use MCP for this skill.
 
 ## Invocation
 

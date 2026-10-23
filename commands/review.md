@@ -14,7 +14,7 @@ Supported flags:
 
 - `--budget <dur>` — wall-clock ceiling (default 30m; `30m`, `1h`, `90s`, or bare minutes; maximum 24h)
 
-- `--base <ref>` — review against a branch/commit diff instead of the working tree
+- `--base <ref>` — review against a branch/commit diff instead of the working tree. Working-tree reviews also include untracked files listed by `git status`; `--base` remains branch/commit-diff only.
 - `-m`, `--model <name>`
 - trailing text — optional focus hint for the review
 

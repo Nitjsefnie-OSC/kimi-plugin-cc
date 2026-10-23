@@ -319,6 +319,34 @@ describe("pursue goal metadata", () => {
     expect(evaluatorCalls).toBe(0);
   });
 
+  test("denies SetGoalBudget with actionable outer-budget guidance", async () => {
+    let evaluatorCalled = false;
+    const decision = await decideHookOutcome(
+      { tool_name: "SetGoalBudget", tool_input: { turns: 10 } },
+      {
+        ...pursue,
+        rescueEvaluator: async () => {
+          evaluatorCalled = true;
+          return { decision: "allow" };
+        },
+      },
+    );
+    expect(decision.decision).toBe("deny");
+    expect(decision.reason).toContain("outer plugin wall-clock budget already applies");
+    expect(decision.reason).toContain("continue the current goal without retrying SetGoalBudget");
+    expect(evaluatorCalled).toBe(false);
+  });
+
+  test("keeps SetGoalBudget denial generic outside pursue", async () => {
+    const decision = await decideHookOutcome(
+      { tool_name: "SetGoalBudget", tool_input: { turns: 10 } },
+      { commandLabel: "ask" },
+    );
+    expect(decision.decision).toBe("deny");
+    expect(decision.reason).toContain("requires a pursue run");
+    expect(decision.reason).not.toContain("continue the current goal");
+  });
+
   test("preserves the rescue evaluator for writes and shell commands", async () => {
     const calls: unknown[] = [];
     for (const tool_name of ["Write", "Edit", "Bash"]) {

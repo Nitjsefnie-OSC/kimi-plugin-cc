@@ -1,29 +1,11 @@
-// Pure decision logic for the kimi-code PreToolUse hook.
+// Pure decision logic for the kimi-code PreToolUse hook. The entry script owns
+// stdin/stdout/exit semantics so callers can test this policy without mocking
+// process IO.
 //
-// Why this module exists separately from the entry script:
-//
-//   The hook script (approval-hook.ts) handles stdin / stdout / exit
-//   semantics. This module is a pure function — easy to unit-test, easy
-//   to import from the entry script and from PR 3's rescue dispatcher
-//   without forcing those callers to mock stdin.
-//
-// Why the hook is load-bearing for safety:
-//
-//   kimi-code's `kimi -p` mode hard-codes `permission: 'auto'` and
-//   registers an auto-approve handler that allows every tool. The
-//   PreToolUse hook fires BEFORE permission rules (verified in
-//   agent-core/src/agent/turn/index.ts:436-458). For read-only commands
-//   (review/challenge/review_gate/ask), the hook is the only mechanism
-//   that overrides -p's auto-approve and enforces the safety contract
-//   advertised by /kimi:review, /kimi:challenge, etc.
-//
-// Fail-closed posture:
-//
-//   Unknown command labels deny anything but Read/Grep/Glob. A
-//   KIMI_PLUGIN_CC_CMD env var someone forgot to set is the "out of
-//   plugin context" case (treated as allow); a label we don't recognize
-//   is the "stale config / misconfigured caller" case (treated as deny
-//   by default).
+// `kimi -p` hard-codes `permission: 'auto'`, and PreToolUse fires before
+// permission rules, so this hook is load-bearing for read-only commands.
+// Unknown command labels fail closed to READ_ONLY_TOOLS. An absent
+// KIMI_PLUGIN_CC_CMD means out-of-plugin use and remains unrestricted.
 /**
  * Tools considered read-only across review/challenge/review_gate/rescue.
  *
@@ -43,17 +25,12 @@ export const READ_ONLY_TOOLS = new Set([
     "TaskOutput",
 ]);
 /**
- * kimi-code's parallel fan-out tool (PR #424, 0.12.0). Its exact tool_name
- * string is `AgentSwarm` (verified against
- * packages/agent-core/src/tools/builtin/collaboration/agent-swarm.ts:87,
- * `readonly name = 'AgentSwarm' as const`). The `/kimi:swarm` (read-only)
- * label allowlists THIS tool so the parent agent can launch the swarm; every
- * spawned subagent inherits the same KIMI_PLUGIN_CC_CMD label and fires THIS
- * hook at permission policy index 0 (kimi-code
- * createPermissionDecisionPolicies puts PreToolCallHookPermissionPolicy at
- * index 0 for ALL agents — no sub-vs-main branch — so a subagent's write is
- * denied exactly like a single-turn review's). The singular `Agent` tool is
- * deliberately NOT allowlisted: swarm is specifically the fan-out surface.
+ * Exact tool name for kimi-code's parallel fan-out. Every spawned subagent
+ * inherits KIMI_PLUGIN_CC_CMD. On native v2, each agent has its own eager
+ * external-hooks service, so this same hook denies subagent writes. Legacy v1
+ * separately relies on PreToolCallHookPermissionPolicy at policy index 0 for
+ * every agent. The singular `Agent` tool remains denied: only the AgentSwarm
+ * fan-out surface is allowlisted.
  */
 const AGENT_SWARM_TOOL = "AgentSwarm";
 /**
@@ -113,6 +90,12 @@ export function decideHookOutcomePure(input, ctx) {
         // Pursue keeps the rescue write boundary, but must be able to inspect and
         // terminally settle its existing goal. Never allow creating/reactivating a
         // goal or changing its budget through this metadata-only exception.
+        if (toolName === "SetGoalBudget" && label === "rescue" && ctx.operationKind === "pursue") {
+            return {
+                decision: "deny",
+                reason: `kimi-plugin-cc safety hook: tool "SetGoalBudget" is denied. The outer plugin wall-clock budget already applies; continue the current goal without retrying SetGoalBudget or changing its budget.`,
+            };
+        }
         const args = input.tool_input;
         const objectArgs = typeof args === "object" && args !== null && !Array.isArray(args) &&
             (Object.getPrototypeOf(args) === Object.prototype || Object.getPrototypeOf(args) === null);
@@ -134,14 +117,9 @@ export function decideHookOutcomePure(input, ctx) {
         case "review":
         case "challenge":
         case "review_gate":
-            // /kimi:ask is documented and dispatched as a read-only narrative
-            // surface (see agents/kimi-ask.md: "do not implement anything Kimi
-            // describes"). PR 2 initially trusted kimi-code's `permission:auto`
-            // for ask on the assumption the user was watching every tool call,
-            // but `/kimi:ask` runs as a non-interactive subprocess via
-            // companion.sh — the user never sees individual tool prompts. PR 4
-            // reviewers flagged this contradiction; ask now shares the
-            // read-only allowlist with review/challenge/review_gate.
+            // Read-only narrative surfaces share READ_ONLY_TOOLS. They run as
+            // non-interactive subprocesses, so interactive tool prompts cannot
+            // substitute for this allowlist.
             if (READ_ONLY_TOOLS.has(toolName)) {
                 return { decision: "allow" };
             }
@@ -150,17 +128,13 @@ export function decideHookOutcomePure(input, ctx) {
                 reason: denyReadOnlyMessage(label, toolName),
             };
         case "swarm":
-            // /kimi:swarm — read-only PARALLEL fan-out. The parent agent must be
-            // allowed to call AgentSwarm (else the swarm never launches and the
-            // hook silently breaks the feature). Every spawned subagent inherits
-            // THIS "swarm" label and fires THIS hook at policy index 0, so a
-            // subagent's Write/Edit/Bash is denied exactly like a single-turn
-            // review's — read-only swarm opens ZERO new write surface. Allow only
-            // the read-only set plus AgentSwarm; deny everything else (including the
-            // singular `Agent` tool — swarm is the fan-out surface, not arbitrary
-            // delegation). Nested AgentSwarm calls from a subagent are allowed and
-            // bounded by the command's wall-clock budget (the only new risk is
-            // cost, not writes).
+            // The coordinator may launch AgentSwarm; every subagent inherits this
+            // label and is evaluated by the same hook, so only READ_ONLY_TOOLS plus
+            // AgentSwarm are allowed and the singular Agent stays denied. This adds
+            // no direct tool-write permission within the repository/Git trust
+            // boundary: read-only Git context commands still trust repository Git
+            // configuration and can execute configured helpers. Nested AgentSwarm
+            // calls remain allowed, with their cost bounded by the command budget.
             if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
                 return { decision: "allow" };
             }
@@ -169,17 +143,12 @@ export function decideHookOutcomePure(input, ctx) {
                 reason: denySwarmMessage(toolName),
             };
         case "swarm-write": {
-            // /kimi:swarm --write — WRITE-capable parallel fan-out (v1.4). The
-            // coordinator and `coder` subagents run in an EPHEMERAL THROWAWAY WORKTREE
-            // (off the user's HEAD). Allow AgentSwarm (else the swarm never launches)
-            // plus the read-only set; deny the singular Agent. Every write/edit/shell
-            // goes through the rescue allowlist — but scoped to the TRUSTED env-provided
-            // worktree root (ctx.trustedWorkspaceRoot), NOT the hook payload `cwd`.
-            // Rationale: the worktree path is exported as KIMI_PLUGIN_CC_WORKSPACE_ROOT
-            // by the same trusted plugin spawn that sets KIMI_PLUGIN_CC_CMD, so the
-            // model running inside kimi cannot forge it, and confinement does not
-            // depend on how upstream derives the payload cwd for an in-process
-            // subagent. Missing root ⇒ fail-closed (deny writes).
+            // Write-capable fan-out runs in an ephemeral worktree. AgentSwarm and the
+            // read-only set are allowed; the singular Agent is denied. Every other
+            // tool goes through the rescue evaluator scoped to the plugin-exported
+            // KIMI_PLUGIN_CC_WORKSPACE_ROOT, never the payload cwd, so an in-process
+            // subagent cannot move the trust boundary or forge its root. A missing
+            // root fails closed for writes.
             if (READ_ONLY_TOOLS.has(toolName) || toolName === AGENT_SWARM_TOOL) {
                 return { decision: "allow" };
             }
@@ -208,14 +177,12 @@ export function decideHookOutcomePure(input, ctx) {
         }
         default:
             if (KNOWN_LABELS.has(label)) {
-                // Should be unreachable — every entry in KNOWN_LABELS has its
-                // own branch above. If you see this, add the case.
                 return {
                     decision: "deny",
                     reason: `kimi-plugin-cc safety hook: command label "${label}" has no policy branch.`,
                 };
             }
-            // Unknown label. Be conservative; only allow Read/Grep/Glob.
+            // Unknown label: fail closed to READ_ONLY_TOOLS only.
             if (READ_ONLY_TOOLS.has(toolName)) {
                 return { decision: "allow" };
             }

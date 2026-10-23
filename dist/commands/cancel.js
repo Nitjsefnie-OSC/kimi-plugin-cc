@@ -34,27 +34,15 @@ export async function runCancel(argv, context) {
         if (job.pid === null && job.kimi_pid === null) {
             throw new RuntimeError("CANCEL_NOT_SUPPORTED", `Job ${job.job_id} does not have a recorded process id to cancel.`, "cancel.runtime");
         }
-        // review_gate runs in a Stop hook; SIGTERMing kimi_pid causes the wire
-        // process to exit with WIRE_PROCESS_EXITED, which the hook's catch path
-        // would persist as `failed`. Pre-mark the row as `cancelled` here so the
-        // user's intent is recorded canonically — the subsequent wire exit is a
-        // no-op against an already-terminal row (markFailed has a WHERE
-        // status='running' guard).
+        // review_gate runs in a Stop hook. Pre-mark the row as cancelled before
+        // signaling so the subprocess close/result path cannot persist a failure
+        // over the user's intent; later updates are no-ops on a terminal row.
         //
-        // Because the row is now terminal, waitForCancellation returns
-        // immediately on the status check and never escalates to SIGKILL. Run
-        // an unconditional SIGTERM→1s→SIGKILL sequence on the recorded pids
-        // here and return early so the lower-level wait/escalation path does
-        // not skip cleanup. (v0.2.4)
+        // The terminal row also makes waitForCancellation return before its own
+        // escalation, so this path always attempts SIGTERM after the pre-mark
+        // attempt, waits 1s, and sends SIGKILL only if a recorded process remains
+        // live. A pre-mark failure is rethrown only after termination is attempted.
         if (job.command_type === "review_gate") {
-            // Pre-mark before signaling so the row persists as `cancelled` rather
-            // than the `failed` the hook's catch path would write on WIRE_PROCESS_EXITED.
-            //
-            // If the pre-mark itself fails (disk I/O, SQLite contention), we must
-            // STILL signal the Kimi child — otherwise the user's cancel command
-            // produces an alive-but-marked-cancelled stuck state. Capture the
-            // pre-mark failure, run the SIGTERM→SIGKILL escalation unconditionally,
-            // and rethrow at the end so the user sees the underlying error.
             let preMarkError;
             try {
                 await withJobStore(paths, async (preMarkStore) => {

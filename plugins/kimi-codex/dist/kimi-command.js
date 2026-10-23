@@ -10,9 +10,7 @@ export function resolveKimiCliCommand(env) {
         parsed = JSON.parse(raw);
     }
     catch {
-        // Plain-text fallback. Mirrors v0.4's permissive shape so users with
-        // an existing `KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS="--import tsx ..."`
-        // export don't have to migrate to JSON for v1.0.
+        // Plain-text values are space-split for launcher-style overrides.
         const plainArgs = raw.split(" ").filter(Boolean);
         assertPrefixArgsSafe(plainArgs, raw);
         return { command, prefixArgs: plainArgs };

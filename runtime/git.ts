@@ -20,6 +20,8 @@ export interface ReviewContext {
   repoRoot: string;
   statusSummary: string;
   diffText: string;
+  diffTruncated: boolean;
+  scope: "working-tree" | "base";
   targetDescription: string;
 }
 
@@ -40,6 +42,8 @@ export async function collectReviewContext(cwd: string, base?: string): Promise<
       repoRoot,
       statusSummary,
       diffText: truncateDiff(diffText),
+      diffTruncated: diffText.length > MAX_DIFF_CHARS,
+      scope: "base",
       targetDescription: `branch diff against ${base}`,
     };
   }
@@ -60,6 +64,8 @@ export async function collectReviewContext(cwd: string, base?: string): Promise<
     repoRoot,
     statusSummary,
     diffText: truncateDiff(diffText),
+    diffTruncated: diffText.length > MAX_DIFF_CHARS,
+    scope: "working-tree",
     targetDescription: "current working tree changes",
   };
 }
@@ -109,7 +115,7 @@ async function getBaseDiff(cwd: string, base: string): Promise<string> {
     return threeDot.stdout;
   }
 
-  return runGit(["diff", "--no-ext-diff", "--unified=3", "--end-of-options", base, "--"], cwd);
+  return runGit(["diff", "--no-ext-diff", "--unified=3", "--end-of-options", base, "HEAD", "--"], cwd);
 }
 
 async function runGit(args: string[], cwd: string): Promise<string> {
@@ -159,7 +165,7 @@ function sha256(value: string): string {
 }
 
 // ---------------------------------------------------------------------
-// Ephemeral worktree lifecycle — write-swarm (v1.4).
+// Ephemeral worktree lifecycle — write-swarm.
 //
 // A write-swarm spawns its coordinator `kimi -p` with cwd = a throwaway
 // detached worktree off the user's HEAD, so `coder` subagents edit there and
@@ -167,7 +173,7 @@ function sha256(value: string): string {
 // working tree + index are isolated and disposable, but it SHARES the main
 // repo's object DB and refs. The PreToolUse hook (swarm-write label) confines
 // every subagent write to this worktree; the plugin captures the result as a
-// patch and removes the worktree. See .claude/docs/write-swarm-spec.md.
+// patch and removes the worktree. See docs/safety.md.
 // ---------------------------------------------------------------------
 
 /**
@@ -225,10 +231,18 @@ export async function createEphemeralWorktree(
  * Returns the patch text (empty string if the swarm changed nothing).
  */
 export async function captureWorktreePatch(worktreePath: string): Promise<string> {
-  // Best-effort intent-to-add so untracked files surface in `git diff HEAD`
-  // (without -N, git diff ignores untracked files entirely). A failure here just
-  // means new files are omitted from the diff, surfaced as a smaller patch.
-  await runGitAllowFailure(["add", "-N", "--", "."], worktreePath);
+  // Intent-to-add is required so untracked files surface in `git diff HEAD`.
+  // An add -N failure aborts capture rather than returning a patch that omits
+  // new files.
+  const intentToAdd = await runGitAllowFailure(["add", "-N", "--", "."], worktreePath);
+  if (!intentToAdd.ok) {
+    throw new RuntimeError(
+      "GIT_WORKTREE_INTENT_TO_ADD_FAILED",
+      `git add -N (worktree capture) failed: ${intentToAdd.stderr || "unknown error"}`,
+      "swarm.worktree",
+      { details: { worktreePath } },
+    );
+  }
   try {
     const { stdout } = await execFileAsync("git", ["diff", "--binary", "HEAD", "--"], {
       cwd: worktreePath,

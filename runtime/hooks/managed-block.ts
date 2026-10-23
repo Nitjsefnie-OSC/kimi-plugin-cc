@@ -1,58 +1,28 @@
 // Shared parser for the kimi-plugin-cc managed block in
-// ~/.kimi-code/config.toml.
+// ~/.kimi-code/config.toml. Setup and the verifier use this one grammar;
+// install-paths.ts separately owns the canonical command bytes and drift
+// classification used here after a mismatch.
 //
-// Why a separate module:
+// Claude Code and Codex share the config but install to different paths. The
+// marker's `:<host-id>` suffix makes each host own and verify only its block.
+// An un-suffixed legacy block can be adopted by the current host on install.
 //
-//   PR 2 added `runtime/hooks/install.ts::verifyHookInstalled` as a
-//   pre-call gate. PR 4 added `runtime/commands/setup.ts` as the
-//   installer. PR 4 reviewers found that the two were validating
-//   different shapes — the verifier was a substring check (could be
-//   bypassed by stray comments containing `kimi-plugin-cc-managed`),
-//   and `setup --check` only confirmed `blockText.includes(hookPath)`
-//   without checking for matcher/event/command exactness. A block with
-//   `matcher = "*"` (which throws inside kimi-code and silently
-//   disables the hook) would pass both gates.
-//
-//   This module owns the single source of truth for what a valid
-//   managed block looks like. Both call sites import from here.
-//
-// (The drift classifier `describeHookCommandDrift` lives in install-paths.ts —
-// the single source of truth for the hook command's byte shape — and is used
-// here to turn a command MISMATCH into an actionable diagnosis when the caller
-// supplies an `nodeExists` fs predicate.)
-//
-// HOST SCOPING (v1.7.0):
-//
-//   Claude Code and Codex install this plugin to DIFFERENT, version-stamped
-//   paths but SHARE one `~/.kimi-code/config.toml`. Before v1.7.0 there was a
-//   single managed block whose `command` was exact-matched to the RUNNING
-//   host's path, so `/kimi:setup` (Claude) and `$kimi-setup` (Codex) overwrote
-//   each other. Now the block is HOST-SCOPED — the marker carries a `:<host-id>`
-//   suffix and each host owns/verifies its OWN block. Un-suffixed markers are
-//   treated as LEGACY (from pre-v1.7.0 single-host installs); the current host
-//   adopts a lone legacy block on its next install (see setup.ts).
-//
-// What a valid managed block looks like (line-by-line, post-trim):
+// A valid block has this line-oriented shape:
 //
 //   # === BEGIN kimi-plugin-cc-managed:<host-id> (vX.Y.Z) ===
-//   ... optional comment lines (any number, any content) ...
+//   ... optional comments ...
 //   [[hooks]]
 //   event = "PreToolUse"
-//   command = "node 'absolute/path/to/approval-hook.js'"  (or process.execPath form)
+//   command = "'/abs/path/to/node' '/abs/path/to/approval-hook.js'"
 //   timeout = <integer>
 //   # === END kimi-plugin-cc-managed:<host-id> ===
 //
 // Critical rules:
 //
-//   - NO `matcher = ...` line. kimi-code compiles matchers as JS regex;
-//     `new RegExp("*")` throws and silently disables the hook. Omitting
-//     matcher means "fire for every tool".
-//   - `event = "PreToolUse"` is required. Any other event would not
-//     enforce our safety contract.
-//   - Exactly ONE `[[hooks]]` declaration inside the block. Two would
-//     register two hooks, which is fine functionally but breaks
-//     idempotency checks.
-//   - The `command` line must contain the hook script path we expect.
+//   - No `matcher` in any TOML spelling: it can disable or narrow the hook.
+//   - `event = "PreToolUse"` is required.
+//   - Exactly one `[[hooks]]` table appears inside the markers.
+//   - The decoded command must equal the canonical expected command byte-for-byte.
 
 import { parse as parseToml } from "../vendor/smol-toml/parse.js";
 import {
@@ -124,7 +94,7 @@ export interface ParsedManagedBlock {
   state: ManagedBlockState;
   /** Every well-formed BEGIN/END pair in the file (all hosts). */
   blocks: ManagedBlockEntry[];
-  /** Trimmed lines used for parsing. Useful for debugging. */
+  /** Lines with only a trailing CR removed, used for parsing and debugging. */
   lines: string[];
 }
 
@@ -141,9 +111,8 @@ function findMarkers(lines: string[]): MarkerHit[] {
     const trimmed = lines[i]!.trim();
     const begin = BEGIN_LINE_RE.exec(trimmed);
     if (begin !== null) {
-      // Normalize marker host ids to lowercase so a hand-edited `:Claude-Code`
-      // isn't treated as a different host from the lowercase `claude-code` the
-      // installer emits (Kimi review — avoids confusing duplicate blocks).
+      // Normalize marker host ids so a hand-edited casing difference cannot
+      // create a distinct host and confusing duplicate blocks.
       hits.push({ index: i, kind: "begin", hostId: begin[1]?.toLowerCase() ?? null });
       continue;
     }
@@ -156,9 +125,8 @@ function findMarkers(lines: string[]): MarkerHit[] {
 }
 
 /**
- * Pair BEGIN/END markers into well-formed blocks. Returns the first orphan
- * (BEGIN-without-END or END-without-BEGIN) encountered, mirroring the
- * pre-v1.7.0 single-block behavior — an orphan is a hard error for install.
+ * Pair BEGIN/END markers into well-formed blocks. Return the first orphan
+ * (BEGIN-without-END or END-without-BEGIN); either is a hard error for install.
  */
 function pairBlocks(
   lines: string[],
@@ -219,7 +187,7 @@ function validateBlockBody(rawBody: string[]): {
       // `event`/`command` lines below could belong to a DIFFERENT table (e.g.
       // `[[hooks]]` with only an event, then `[not_hooks]` carrying the
       // canonical command). Binding the block to exactly one [[hooks]] table
-      // keeps the verifier from blessing a command-less hook. (Codex review.)
+      // keeps the verifier from blessing a command-less hook.
       invalidReason =
         "block contains an unexpected TOML table — only a single [[hooks]] table is allowed. Reinstall with /kimi:setup to repair.";
       break;
@@ -236,21 +204,15 @@ function validateBlockBody(rawBody: string[]): {
     const basic = COMMAND_LINE_RE.exec(line);
     const literal = COMMAND_LITERAL_LINE_RE.exec(line);
     if (basic !== null || literal !== null) {
-      // TOML basic strings escape `\`, `"`, and the control chars.
-      // Setup writes the escaped form via `tomlBasicString`; the
-      // verifier compares against the JS-string canonical command, so
-      // we must decode the escapes here before equality. Without this,
-      // a hook script path containing `'` round-trips through
-      // `shellSingleQuote` -> backslash -> TOML basic-string escape ->
-      // captured raw -> mismatch on verify. Audit re-review (reports
-      // 33/34) flagged this as a UX false-fail. Literal strings ('...')
-      // have no escapes — pass through as-is.
+      // Decode TOML basic-string escapes before comparing with the canonical JS
+      // string; literal strings have no escapes. Otherwise shell quoting and
+      // TOML escaping can make an equivalent command compare unequal.
       commandPath = basic !== null ? decodeTomlBasicString(basic[1]!) : literal![1]!;
       continue;
     }
-    // Other TOML lines (timeout = N, etc.) are accepted as opaque
-    // pass-through. We don't validate them; if kimi-code rejects them
-    // the probe will catch it.
+    // Other TOML lines are ignored only by this local grammar. Whole-file schema
+    // validation and foundHookEntryIsClean reject foreign keys before an
+    // installed verdict; the shell probe is not the validation backstop.
   }
 
   if (invalidReason === undefined) {
@@ -263,17 +225,11 @@ function validateBlockBody(rawBody: string[]): {
     }
   }
 
-  // Parser-based matcher rejection — defense in depth over the line-based
-  // MATCHER_LINE_RE above. smol-toml normalizes a quoted `"matcher"`, a literal
-  // `'matcher'`, or a dotted key to the `matcher` key that the bare-line regex
-  // (`/^matcher\s*=/`) MISSES, while kimi-code's real parser honors it and
-  // DISABLES the hook (`new RegExp("*")` throws → fire-for-nothing → auto-
-  // approve). The absent-state fallback (`hasCleanEnforcingHookEntry`) already
-  // parses and is immune; the primary marked-block path must be too, or a
-  // quoted matcher slips a disabled hook past the verifier as `installed:true`.
-  // Fail closed on any parse error — a body that won't parse in isolation is
-  // anomalous and kimi-code would reject the whole config anyway. (kimi
-  // whole-repo audit 2026-07-17.)
+  // Parser-based matcher rejection backs up the bare-line regex: smol-toml
+  // normalizes quoted, literal, and dotted matcher keys that the regex misses,
+  // while kimi-code honors them and can disable or narrow the hook. Both this
+  // marked-block path and the absent-state fallback must parse the real TOML.
+  // Fail closed when the body cannot be parsed in isolation.
   if (invalidReason === undefined) {
     try {
       const parsed = parseToml(rawBody.join("\n"));
@@ -312,9 +268,8 @@ function validateBlockBody(rawBody: string[]): {
  * Other hosts' suffixed blocks are ignored for this host's state (that is the
  * whole point of host scoping — they coexist).
  *
- * Stripping line endings before the per-line matchers means this is
- * CRLF-safe — the trailing `\r` on each line is removed before regex
- * comparison.
+ * Only a trailing `\r` is removed from each line for CRLF safety; other line
+ * whitespace is preserved here and trimmed only by the relevant matchers.
  */
 export function parseManagedBlock(contents: string, hostId: string): ParsedManagedBlock {
   const rawLines = contents.split("\n");
@@ -326,13 +281,10 @@ export function parseManagedBlock(contents: string, hostId: string): ParsedManag
   }
   const blocks = paired.blocks;
 
-  // A block "belongs to" the current host when its marker suffix is this host,
-  // OR (for a legacy un-suffixed block) its command path derives to this host —
-  // an un-parseable/stale legacy command is claimable by whoever installs next.
-  // This is what stops one host from adopting/clobbering another host's legacy
-  // block during migration (Kimi review): a `~/.codex/…` legacy block is NOT
-  // relevant to the `claude-code` host, so Claude appends its own block and
-  // leaves Codex's intact.
+  // A block belongs to this host when its marker suffix matches or, for a
+  // legacy un-suffixed block, its command derives to this host. An unattributable
+  // legacy command is claimable by the next installer; a command attributed to
+  // another host is ignored so its block remains untouched.
   const relevant = blocks.filter((b) => effectiveHost(b, hostId) === hostId);
   if (relevant.length === 0) {
     return { state: { kind: "absent" }, blocks, lines };
@@ -386,20 +338,9 @@ export function decodeManagedCommandLine(trimmedLine: string): string | null {
 }
 
 /**
- * Convenience helper: is the supplied config in a "managed block is
- * installed and valid" state for `hostId`, with the EXACT expected hook
- * command?
- *
- * `expectedCommand` is the canonical byte string the installer would
- * write into `command = "..."` for the current env — produced by
- * `buildHookShellCommand(resolveHookScriptPath(env), env)`. Equality is
- * exact, not substring: the substring form let a crafted command like
- * `true # /path/to/approval-hook.js` pass while `/bin/sh -c` ran only
- * `true` (no-op allow). Audit reports 27/28 (Codex C1 + Claude HIGH-2)
- * tracked this fix.
- *
- * Returns a structured result so callers can produce informative
- * messages (vs a bare boolean).
+ * Structured installed verdict for `hostId`. `expectedCommand` is the canonical
+ * byte string from `buildHookShellCommand`; equality is exact, never a substring
+ * check that could bless a command which merely mentions the hook path.
  */
 export interface InstalledCheck {
   installed: boolean;
@@ -418,26 +359,10 @@ export interface InstalledCheck {
    */
   note?: string;
   /**
-   * Machine-readable drift classification, populated ONLY when a structurally
-   * valid, canonically-parseable command differs from the expected one. The
-   * companion's callers are LLMs: `reason` is prose for a human, this is the
-   * field an agent branches on (LLM-caller discipline — load-bearing context
-   * belongs in structured state, never in stderr prose).
-   *
-   * `axis` names WHICH token moved:
-   *   - `"hook-script"` — plugin update/move (install paths are version-stamped).
-   *     Recoverable by re-running setup on this host.
-   *   - `"node-bin"` — Node upgrade or version-manager switch.
-   *   - `"both"` — both tokens moved (e.g. a Node upgrade and a plugin update
-   *     between runs).
-   *
-   * STRICTLY ADVISORY. Like `nodeExists`-based classification, this NEVER
-   * influences `installed`; it is derived AFTER the byte-exact comparison has
-   * already failed. It exists so a caller can re-run setup and retry rather
-   * than dead-ending — the repair stays an explicit, visible action taken by
-   * the caller, never a silent self-write from the verify path (see
-   * `.claude/hook-pin-durability-spec-2026-07-25.md` § 6, and the two
-   * adversarial reviews that rejected in-verifier auto-repin).
+   * Advisory classification of a canonically parseable command mismatch,
+   * derived only after exact equality fails. It never changes `installed` and
+   * never triggers an in-verifier write or auto-repin. A caller may use it to
+   * request setup explicitly and follow the structured retry protocol.
    */
   drift?: HookCommandDrift;
 }
@@ -448,58 +373,26 @@ export interface HookCommandDrift {
   installedCommand: string;
   expectedCommand: string;
   /**
-   * Present only when the node token differs: `true` when both spellings name
-   * the SAME file (a rename, not an interpreter move — the v1.9.0 stable-path
-   * re-pin). Load-bearing for `retryable_after_setup`; see `hookRefusalDetails`.
+   * Present only when the Node token differs. True means both spellings name
+   * the same file, which makes node-bin/both drift setup-retryable through
+   * `retryable_after_setup`; a different interpreter is not auto-repairable.
    */
   nodeInterpreterUnchanged?: boolean;
 }
 
 export interface EvaluateInstalledOptions {
   /**
-   * Host id the current companion runs as (from `resolveHostId`). Selects
-   * which host-scoped block the verifier equality-checks. A lone legacy
-   * (un-suffixed) block is adopted as a fallback for backward compat.
+   * Host id from `resolveHostId`; selects this host's block. A lone legacy
+   * un-suffixed block is the backward-compatibility fallback.
    */
   hostId: string;
   /**
-   * Optional fs predicate (e.g. `existsSync`). When provided, a command
-   * MISMATCH is classified into an actionable H4 diagnosis — Node upgrade /
-   * version-manager switch (old interpreter gone) vs. plugin-path drift — via
-   * `describeHookCommandDrift`, instead of the generic expected-vs-got reason.
-   * Omitted (pure callers / most tests) keeps the generic reason. Classification
-   * NEVER changes the installed decision, only the human/LLM-facing reason.
+   * Optional filesystem predicate used only to refine a mismatch reason through
+   * `describeHookCommandDrift`. It never changes the installed decision.
    */
   nodeExists?: (binPath: string) => boolean;
 }
 
-/**
- * Robust, PARSER-based "is our clean enforcing hook present?" check for the
- * marker-less fallback. Parses the whole config with the same vendored
- * `smol-toml` kimi-code uses, then looks for a `hooks[]` entry that is EXACTLY
- * our clean hook:
- *
- *   - `event === "PreToolUse"`,
- *   - `command === expectedCommand` (byte-exact — the security boundary),
- *   - NO `matcher` key in ANY TOML spelling (bare `matcher`, quoted
- *     `"matcher"`, after a blank line, past a multiline array) — a matcher can
- *     disable the hook (`new RegExp("*")` throws → hook never fires) or narrow
- *     it to a subset of tools, so its presence means "not a clean install",
- *   - no keys beyond `{event, command, timeout}` — an unknown key trips
- *     kimi-code's `.strict()` hook schema and disables the whole hooks array.
- *
- * Using the real parser (not the line-oriented `findBareApprovalHookTables`,
- * which stays the conservative PRUNE scanner) closes the entire class of
- * line-scanner blind spots a three-model review panel demonstrated (Opus +
- * Codex + kimi all independently: parse the table, don't lex it). Returns
- * `false` on any parse error — fail-closed. The real callers
- * (`verifyHookInstalled`, `runCheck`) run whole-file schema validation first,
- * so a malformed or foreign-invalid file never reaches an installed verdict.
- *
- * NOTE: this deliberately does NOT range-check `timeout` — that is the config
- * schema's job (run upstream by both callers). A clean entry with an
- * out-of-range timeout is refused there, not here.
- */
 /**
  * Return `contents` with every well-formed managed BEGIN/END block removed
  * (inclusive), so what remains is only the bare/root TOML. Used by
@@ -542,17 +435,18 @@ function hooksArrayHasCleanEntry(hooks: unknown, expectedCommand: string): boole
   return false;
 }
 
+/**
+ * Parser-based fallback used only in the absent state. Strip every managed
+ * block first so another host's live hook cannot count for this host, then parse
+ * the remaining bare/root TOML with the real parser rather than the prune line
+ * scanner. `hooksArrayHasCleanEntry` requires the exact event and command, no
+ * matcher in any spelling, and no foreign keys. Parse errors fail closed.
+ * Callers run whole-file schema validation first, including timeout ranges.
+ */
 export function hasCleanEnforcingHookEntry(
   contents: string,
   expectedCommand: string,
 ): boolean {
-  // Consider only hooks that live OUTSIDE every managed BEGIN/END block. In the
-  // `absent` state this host has no block of its own, so any surviving marked
-  // block belongs to ANOTHER host — its entries are that host's responsibility,
-  // not evidence that THIS host is installed (host isolation). The fallback's
-  // whole purpose is to recognize a MARKER-STRIPPED (bare) copy of our own hook,
-  // so we strip all marked-block lines, then parse the remainder with the real
-  // TOML parser.
   let parsed: unknown;
   try {
     parsed = parseToml(stripManagedBlockLines(contents));
@@ -571,7 +465,7 @@ export function hasCleanEnforcingHookEntry(
  * table), so kimi-code loads it and DISABLES the hook (`new RegExp("*")` throws)
  * while the marked body looks clean → a fail-open `installed:true`. Parsing the
  * whole file exactly as kimi-code does attributes that trailing key to our entry
- * and rejects it. Fail-closed on any parse error. (Fable/kimi audit 2026-07-17.)
+ * and rejects it. Fail-closed on any parse error.
  */
 function foundHookEntryIsClean(contents: string, expectedCommand: string): boolean {
   let parsed: unknown;
@@ -591,20 +485,11 @@ export function evaluateInstalled(
 ): InstalledCheck {
   const { state } = parseManagedBlock(contents, opts.hostId);
   if (state.kind === "absent") {
-    // kimi-code re-serializes config.toml on login/settings writes via a
-    // comment-dropping TOML stringifier (`stringifyToml(configToTomlData(...))`
-    // in packages/agent-core/src/config/toml.ts — smol-toml has no comment
-    // support), which deletes our BEGIN/END markers while leaving the
-    // `[[hooks]]` TABLE (data) intact and enforcing. Markers were never the
-    // security boundary — the byte-exact canonical command is — so a
-    // marker-less table that is EXACTLY our clean enforcing hook still counts
-    // as installed. This decision is made against the REAL TOML parser (not a
-    // line scanner): a line scanner has TOML-semantic blind spots that a
-    // reviewer panel demonstrated let a hook-DISABLING `matcher` hide from it —
-    // after a blank line, behind a quoted `"matcher"` key, or past a multiline
-    // array value — while kimi-code still honors it (`new RegExp("*")` throws →
-    // hook disabled → auto-approve). The parser sees the whole table regardless
-    // of layout, so `hasCleanEnforcingHookEntry` is immune to all three.
+    // kimi-code config rewrites drop comments but leave hook tables intact. In
+    // the absent state only, accept a marker-less table that is exactly this
+    // host's clean enforcing hook: markers are not the security boundary, the
+    // byte-exact command is. The real TOML parser sees matchers and foreign keys
+    // across blank lines, quoted spellings, and multiline values.
     if (hasCleanEnforcingHookEntry(contents, expectedCommand)) {
       return {
         installed: true,
@@ -614,12 +499,8 @@ export function evaluateInstalled(
         state,
       };
     }
-    // Markers absent AND no byte-exact bare table. The common real-world cause
-    // is BOTH failures at once: kimi-code strips markers on every login/settings
-    // write, and a plugin update then moves the version-stamped hook path. The
-    // 2026-07-25 Codex incident was exactly this pair. Classify the drift from
-    // this host's own stale bare table so callers still get an actionable axis
-    // instead of a bare "not present".
+    // If no exact bare table remains, classify drift only from this host's own
+    // stale table so the caller gets an actionable axis.
     const staleOwn = findBareApprovalHookTables(contents).find(
       (table) =>
         table.command !== expectedCommand &&
@@ -672,11 +553,6 @@ export function evaluateInstalled(
       drift: classifyHookCommandDrift(state.commandPath, expectedCommand),
     };
   }
-  // The marked body (lines between BEGIN/END) passed the line grammar and the
-  // command matches — but confirm with the REAL whole-file parse that no matcher
-  // or stray key rides our `[[hooks]]` table from OUTSIDE the markers (e.g. after
-  // the END comment, which does not terminate the TOML table). Such a key would
-  // load in kimi-code and disable/reject the hook while the body looks clean.
   if (!foundHookEntryIsClean(contents, expectedCommand)) {
     return {
       installed: false,
@@ -689,11 +565,11 @@ export function evaluateInstalled(
 }
 
 /**
- * A marker-less `[[hooks]]` table living OUTSIDE any managed BEGIN/END block
- * that matches the managed-block grammar (`event = "PreToolUse"`, a decodable
- * `command`, optional `timeout`/comments, no matcher in its TOML span, no
- * foreign keys in its contiguous body). `command` is the decoded shell command;
- * `[start, end)` is the conservative half-open line range to delete on prune.
+ * A marker-less table outside managed blocks that matches the conservative
+ * prune line grammar: PreToolUse, a decodable command, optional timeout and
+ * comments, no matcher recognized by that scanner, and no foreign keys in its
+ * contiguous body. This is not a full TOML-semantic cleanliness proof.
+ * `[start, end)` is the conservative half-open deletion range.
  */
 export interface BareHookTable {
   start: number;
@@ -702,23 +578,17 @@ export interface BareHookTable {
 }
 
 /**
- * The line-oriented PRUNE scanner: find bare (marker-less) `[[hooks]]` tables
- * matching our grammar so `findUnmanagedApprovalHookBlocks` can remove them.
+ * Line-oriented PRUNE scanner, never the installed decision; that decision uses
+ * the real TOML parser through `hasCleanEnforcingHookEntry` and
+ * `foundHookEntryIsClean`.
  *
- * NOTE: the INSTALLED decision does NOT use this — it uses the real TOML parser
- * (`hasCleanEnforcingHookEntry`), because a line scanner has TOML-semantic
- * blind spots (a `matcher` hidden after a blank line / behind a quoted key /
- * past a multiline array). This scanner is only for computing physical line
- * RANGES to delete, where a conservative, layout-aware view is what we want.
- *
- * `[start, end)` (the range to delete) stays CONSERVATIVE: it covers only the
- * contiguous non-blank body after the `[[hooks]]` header (stopping at the first
- * blank line, next table header, or managed marker), so a prune never swallows
- * adjacent user content past a blank separator. Separately, to avoid leaving a
- * DANGLING `matcher` when a table has one after a blank line, the GRAMMAR check
- * scans the table's full TOML span (to the next header/marker/EOF) for a
- * `matcher` line and, if found, does not report the table at all (so it is
- * never half-cut). `command` is the decoded shell command.
+ * The deletion range `[start, end)` is conservative: only the contiguous
+ * non-blank body after `[[hooks]]`, stopping at a blank line, table header, or
+ * managed marker so adjacent user content is preserved. A separate full-span
+ * scan rejects matcher lines recognized by MATCHER_LINE_RE to avoid half-cutting
+ * a table. That scan is deliberately heuristic and does not claim to recognize
+ * every quoted or dotted TOML matcher spelling. `command` is decoded for the
+ * caller's ownership checks.
  */
 export function findBareApprovalHookTables(contents: string): BareHookTable[] {
   const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
@@ -739,12 +609,9 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
     let commandDecoded = "";
     let hasPreToolUseEvent = false;
     let hasMatcher = false;
-    // A table we wrote contains ONLY event/command/timeout (+ comments). If any
-    // OTHER key appears — e.g. a multi-line `metadata = [ … ]` array, whose
-    // continuation lines would otherwise fool the `[`-boundary check and leave
-    // dangling TOML after a partial prune — treat the table as NOT ours and
-    // skip it. Conservative by design (Codex review): never partially cut a
-    // structure we don't fully recognize.
+    // Our tables contain only event/command/timeout and comments. Any other key,
+    // including a multiline array, makes the shape unrecognized so pruning never
+    // partially cuts a structure and leaves dangling TOML.
     let simpleGrammar = true;
     while (j < lines.length) {
       const trimmed = lines[j]!.trim();
@@ -752,7 +619,7 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
       // Any TOML table header bounds the table — including one with a trailing
       // comment (`[[permission.rules]] # note`). A bare leading `[` is a table
       // header in TOML (value arrays are `key = [...]`), so stop there and
-      // never swallow the next table. (Codex review.)
+      // never swallow the next table.
       if (trimmed.startsWith("[")) break;
       if (BEGIN_LINE_RE.test(trimmed) || END_LINE_RE.test(trimmed)) break;
       if (trimmed.startsWith("#")) {
@@ -774,22 +641,13 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
       }
       j += 1;
     }
-    // CRITICAL (Opus review, HIGH): a blank line does NOT end a TOML table —
-    // table membership runs from `[[hooks]]` to the NEXT table header (`[…`) or
-    // EOF, across any blank lines. The contiguous loop above stops at the first
-    // blank, so a `matcher = "*"` placed AFTER a blank line is still part of
-    // this hook table for kimi-code's real parser: it loads (matcher is a
-    // schema-valid string, so whole-file validation passes), then throws at
-    // `new RegExp("*")` at hook-execution time and SILENTLY DISABLES the hook.
-    // If we only checked the contiguous body we'd report `installed: true` for
-    // a hook that is actually off — the exact auto-approve bypass this plugin
-    // exists to prevent. So scan the REST of the table's TOML span for a
-    // matcher and reject the table if one appears anywhere. (The prune line
-    // range stays `[start, j)` — conservative, never eating past the blank —
-    // because a rejected table is never pruned anyway.) Foreign keys after a
-    // blank are NOT re-checked here: an unknown key fails kimi-code's `.strict()`
-    // hook schema, so `validateKimiHookSetForEnvironment` rejects the whole file
-    // upstream; only `matcher` is schema-valid-but-hook-disabling.
+    // A blank line does NOT end a TOML table; membership continues to the next
+    // header or EOF. The deletion range nevertheless stops at the blank to
+    // preserve adjacent user content. Scan the remaining span for matcher lines
+    // this scanner recognizes and reject the table rather than half-cutting it:
+    // matcher is schema-valid but can disable the hook at runtime. Foreign keys
+    // and other TOML spellings are handled by whole-file schema validation and
+    // the parser-based installed checks, not by this prune heuristic.
     let matcherBeyondBody = false;
     for (let k = j; k < lines.length; k += 1) {
       const t = lines[k]!.trim();
@@ -801,12 +659,10 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
         break;
       }
     }
-    // Only report a table that matches our managed-block grammar EXACTLY:
-    // `event = "PreToolUse"`, no matcher anywhere in its TOML span, and no keys
-    // beyond event/command/timeout in the contiguous body. (Codex + Kimi review
-    // — reduces false positives and avoids corrupting a multi-line-array table.)
-    // Command-identity filtering (ours? whose host?) is the caller's concern —
-    // see `findUnmanagedApprovalHookBlocks` and `evaluateInstalled`.
+    // Report only tables matching this conservative line grammar: PreToolUse,
+    // a decoded command, no recognized matcher in the TOML span, and no foreign
+    // keys in the contiguous body. This is not a full TOML-semantic acceptance
+    // check; command and host ownership are the caller's concern.
     if (
       simpleGrammar &&
       commandDecoded.length > 0 &&
@@ -821,20 +677,12 @@ export function findBareApprovalHookTables(contents: string): BareHookTable[] {
 }
 
 /**
- * Find orphaned, marker-less `[[hooks]]` tables that are unambiguously THIS
- * plugin's approval hook (canonical `'<node>' '<...>/approval-hook.js'` command
- * under a kimi-marketplace / kimi-plugin-cc tree) and live OUTSIDE any managed
- * BEGIN/END block. These arise when a kimi-code config rewrite strips the
- * marker comments off a live block (kimi-code's TOML stringifier drops all
- * comments), or from pre-v1.7.0 installs / host-path churn.
- *
- * HOST SCOPING (v1.8.2): pass `ownedBy` (a host id from `resolveHostId`) to
- * restrict the result to tables whose command path derives to THAT host via
- * `hostIdFromHookCommand`. Pruning MUST pass it — after a kimi-code comment
- * strip, another host's marker-less table is that host's LIVE hook, and a
- * host-blind prune silently disarms it (the pre-v1.8.2 seesaw: each host's
- * setup deleted the other's enforcement). Omitting `ownedBy` is the explicit
- * every-host sweep reserved for `/kimi:setup --uninstall --all`.
+ * Find marker-less canonical approval-hook tables outside managed blocks.
+ * `ownedBy` restricts results to the host derived from each command and is
+ * required for scoped pruning: another host's marker-less table may be its live
+ * hook after a config rewrite. Omit `ownedBy` only for the explicit every-host
+ * `/kimi:setup --uninstall --all` sweep. Non-canonical and hand-rolled hooks are
+ * not claimed.
  */
 export function findUnmanagedApprovalHookBlocks(
   contents: string,
@@ -842,15 +690,10 @@ export function findUnmanagedApprovalHookBlocks(
   alsoMatchCommand?: string,
 ): BareHookTable[] {
   return findBareApprovalHookTables(contents).filter((table) => {
-    // A table whose command byte-equals what THIS host would write is
-    // unambiguously this host's own (marker-stripped) hook — the tightest
-    // possible ownership signal, stronger than any path derivation. Match it
-    // regardless of `ownedBy`, so the install re-adorn works even when a
-    // `KIMI_PLUGIN_CC_HOST_ID` override disagrees with the path-derived host
-    // (`hostIdFromHookCommand`) — otherwise setup would append a duplicate
-    // block beside the identical bare table (Kimi review F4). Never widens the
-    // prune: another host's table and a hand-rolled hook carry different
-    // commands, so they never equal this host's canonical command.
+    // Exact current command bytes are the strongest ownership signal and win
+    // even when a host-id override disagrees with path derivation. This does
+    // not widen the prune: another host's or a hand-rolled hook has different
+    // command bytes.
     if (alsoMatchCommand !== undefined && table.command === alsoMatchCommand) return true;
     if (!isOurApprovalHookCommand(table.command)) return false;
     if (ownedBy === undefined) return true;
@@ -872,9 +715,8 @@ export const MARKERS = {
  * we compare against never contains them, so a mismatch surfaces as
  * "installed: false" rather than a parse error.
  *
- * The inverse of `tomlBasicString` in `runtime/hooks/install-paths.ts`'s
- * sibling helper in setup.ts. Audit re-review (reports 33/34) flagged
- * the missing decode as a verifier false-fail for apostrophe paths.
+ * Inverse of `tomlBasicString` in `runtime/commands/setup.ts`; decoding before
+ * comparison prevents shell/TOML escaping from causing a false mismatch.
  */
 function decodeTomlBasicString(raw: string): string {
   let out = "";

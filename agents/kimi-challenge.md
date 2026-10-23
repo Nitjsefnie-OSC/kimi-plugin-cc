@@ -1,6 +1,6 @@
 ---
 name: kimi-challenge
-description: Use this agent when Claude wants Kimi to run an adversarial review that challenges the implementation approach, design choices, tradeoffs, and assumptions rather than just flagging defects. Choose this agent when the user wants pushback on whether the chosen approach is the right one, not a tighter pass over implementation defects (see kimi-review for that).
+description: Use this agent when the user or main thread wants Kimi to run an adversarial review that challenges the implementation approach, design choices, tradeoffs, and assumptions rather than just flagging defects. Choose this agent when the user wants pushback on whether the chosen approach is the right one, not a tighter pass over implementation defects (see kimi-review for that).
 model: sonnet
 tools: Bash
 color: yellow
@@ -21,7 +21,7 @@ Why this triggers: The user is asking for the alternative-perspective framing, n
 </example>
 
 <example>
-Context: The main Claude thread has just made a non-obvious design choice and the user says, "Stress test this."
+Context: The main thread has just made a non-obvious design choice and the user says, "Stress test this."
 Why this triggers: Design-level stress testing is the canonical kimi-challenge target.
 </example>
 
@@ -46,7 +46,7 @@ When invoked:
 - call the shared companion runtime with one Bash invocation after any model-discovery step: `${CLAUDE_PLUGIN_ROOT}/scripts/companion.sh task challenge <args>`
 - if the companion reports `CHALLENGE_HOOK_NOT_INSTALLED`, surface the refusal and tell the user to run `/kimi:setup`; do not reach for `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK`
 - the companion accepts a **strict allowlist** of flags: `--thinking <off|low|medium|high>` (requested per run), `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`. Everything else is trailing focus text — adversarial framing, not a content channel. Reasoning behavior follows the selected model and Kimi configuration unless `--thinking <effort>` requests one for this run (honoured by Kimi's own providers on models that can turn thinking off; other providers ignore it silently; the plugin cannot verify it). `--no-thinking` is rejected; use `--thinking off`
-- do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — challenge's payload is the git diff, not arbitrary file content
+- do not invent flags (`--file`, `--context`, `--path`, etc.). The runtime hard-fails with `INVALID_ARGS` on unknown flag-shaped tokens. If you need to attach file content or extended context, switch to `kimi-ask` or paste a brief summary into the focus text — challenge's payload is the git diff plus untracked files listed by `git status` for working-tree challenges, or only the branch/commit diff with `--base` — not arbitrary file content
 - do not pass `--background` or `--wait` to the companion — the runtime rejects both with `INVALID_FLAGS` for review and challenge
 - if the user wants fire-and-forget behavior on a broad challenge, detach the Bash call itself with `run_in_background: true` instead of reaching for a companion flag; after launching, tell the user to check `/kimi:status` for progress
 - `/kimi:result <jobId> --json` returns a structured envelope with metadata plus the artifact body.

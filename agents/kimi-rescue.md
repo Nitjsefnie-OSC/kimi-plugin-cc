@@ -1,6 +1,6 @@
 ---
 name: kimi-rescue
-description: Use this agent proactively when the user wants to delegate a substantial investigation or implementation task to Kimi, especially multi-step bug hunts, cross-file refactors, or work the main Claude thread would rather offload than context-switch through. Choose this agent when the work is too large for an inline response but the user clearly wants it handed off, not just reviewed.
+description: Use this agent proactively when the user wants to delegate a substantial investigation or implementation task to Kimi, especially multi-step bug hunts, cross-file refactors, or work the main thread would rather offload than context-switch through. Choose this agent when the work is too large for an inline response but the user clearly wants it handed off, not just reviewed.
 model: sonnet
 tools: Bash
 color: magenta
@@ -26,7 +26,7 @@ Why this triggers: The user is clearly asking to resume a prior Kimi rescue work
 </example>
 
 <example>
-Context: The main Claude thread has been debugging a multi-file runtime error for several turns, the investigation has grown beyond inline reasoning, and the user has not yet explicitly asked for delegation.
+Context: The main thread has been debugging a multi-file runtime error for several turns, the investigation has grown beyond inline reasoning, and the user has not yet explicitly asked for delegation.
 Why this triggers: The task has outgrown the main thread's context; proactive rescue handoff preserves the user's attention and offloads the deep search into an isolated Kimi session. Proactive rescue is for a SINGLE bounded handoff of in-flight work — if the user wants Kimi to keep driving toward an objective on its own across many turns, that is autonomous goal mode and needs explicit intent (see kimi-pursue), not rescue's proactive path.
 </example>
 

@@ -1,43 +1,21 @@
 import { SETUP_SUPPORTED_FLAGS } from "../parsing.js";
-// Managed-block installer for the kimi-code PreToolUse hook.
+// Managed-block installer for the load-bearing kimi-code PreToolUse hook.
+// Without it, `kimi -p` auto-approves tool calls, including from read-only
+// commands.
 //
-// Replaces the v0.4 Wire-based setup probe. In v1.0 the load-bearing
-// safety control is the PreToolUse hook (see runtime/hooks/approval-policy.ts) —
-// without it, `kimi -p` auto-approves every tool call from review /
-// challenge / review_gate / ask. PR 3 made rescue REFUSE to run when the
-// hook is missing, so /kimi:setup is the only path that wires the
-// plugin's safety story into ~/.kimi-code/config.toml.
+// Setup writes or refreshes a host-scoped BEGIN/END block containing the
+// canonical `'<absolute-node>' '<absolute-hook-script>'` command from
+// resolveNodeBinary/buildHookShellCommand. Both tokens are shell-quoted and the
+// absolute Node path avoids PATH dependence under sanitized launches. Setup
+// probes the hook directly with resolveNodeBinary and through `/bin/sh -c`
+// using the exact installed command bytes. It also warns about broad permission
+// denies and refuses duplicate, orphaned, or malformed managed blocks.
 //
-// What this command does:
+// Subcommands: install (default), --check, --uninstall [--all], and
+// --enable-review-gate/--disable-review-gate.
 //
-//   - Writes (or refreshes, idempotently) a BEGIN/END marker block to
-//     `~/.kimi-code/config.toml` containing a [[hooks]] entry that
-//     invokes `<process.execPath> /abs/path/to/dist/hooks/approval-hook.js`
-//     on PreToolUse. The absolute Node binary is used (not bare `node`)
-//     so the hook keeps working when kimi-code is launched from a
-//     GUI/LaunchAgent with a sanitized PATH (nvm/asdf/mise users).
-//   - Probes the installed hook in TWO ways: (a) directly via the same
-//     in-process Node binary, and (b) via `/bin/sh -c "<command>"` to
-//     mirror kimi-code's actual hook-runner spawn shape (kimi-code
-//     shells out via `/bin/sh -c` per agent-core hooks/runner.ts).
-//   - Scans the user's existing `[[permission.rules]]` for broad denies
-//     that would interfere with read-only commands; warns on stdout.
-//   - Detects and refuses to install over duplicate managed blocks,
-//     orphan markers, or malformed blocks (matcher present, wrong
-//     event, missing command). Same parser shared with PR 2's
-//     runtime/hooks/install.ts verifier.
-//
-// Subcommands:
-//
-//   /kimi:setup                — install (idempotent) + probe
-//   /kimi:setup --check        — probe only (no write)
-//   /kimi:setup --uninstall    — remove managed block (and orphan markers)
-//   /kimi:setup --enable-review-gate / --disable-review-gate
-//                              — flip the plugin-side review-gate flag in
-//                                CLAUDE_PLUGIN_DATA/config.json
-//
-// TOML manipulation is line-based, not via a TOML parser. The marker
-// block is owned by us; the rest of the file is the user's, untouched.
+// Managed-block splicing is line-based and preserves user bytes outside owned
+// edits; whole-file validation and inline-hook normalization use the TOML parser.
 import { spawn } from "node:child_process";
 import { access, mkdir, open, readFile, rename, unlink, } from "node:fs/promises";
 import { constants as fsConstants, existsSync } from "node:fs";
@@ -59,13 +37,10 @@ const DEFAULT_HOOK_TIMEOUT_S = 15;
 // node startup on cold CI runners. The shell probe adds /bin/sh fork
 // overhead but should still complete well within the same budget.
 const PROBE_TIMEOUT_MS = 5_000;
-// Reject hook script paths that contain characters TOML basic strings
-// reserve as escape sequences (other than the ones we already escape)
-// or shell-special characters whose presence would force us into
-// fragile quoting. The realistic install location lives under
-// `${plugin_root}/dist/hooks/approval-hook.js` and never legitimately
-// contains these — anyone hitting this hard error has either a hostile
-// `KIMI_PLUGIN_CC_HOOK_SCRIPT` override or an unusual install layout.
+// Reject the specific control characters, double quotes, and backslashes matched
+// below, including newlines and tabs; this is not a general shell-metacharacter
+// filter. Normal install paths do not contain them, so a match indicates an
+// unsafe override or an unusual layout that needs an explicit path change.
 const PATH_FORBIDDEN_RE = /[\x00-\x1f"\\\n\r\t]/;
 export async function runSetup(argv, context) {
     const parsed = parseArgs(argv);
@@ -86,8 +61,8 @@ export async function runSetup(argv, context) {
     const configPath = resolveKimiCodeConfigPath(context.env);
     const hookScriptPath = resolveHookScriptPath(context.env);
     assertHookPathTomlSafe(hookScriptPath);
-    // Host id keys the managed block so Claude Code and Codex share one
-    // ~/.kimi-code/config.toml without clobbering each other (v1.7.0).
+    // Host id scopes each managed block so Claude Code and Codex can share one
+    // ~/.kimi-code/config.toml without clobbering each other.
     const hostId = resolveHostId(context.env, hookScriptPath);
     const warnings = [];
     switch (parsed.mode) {
@@ -154,12 +129,9 @@ async function runInstall(configPath, hookScriptPath, hostId, reviewGateEnabled,
             }
             warnings.push(`Converted the top-level inline hooks array (${inlineHooks.entryCount} entr${inlineHooks.entryCount === 1 ? "y" : "ies"}) to canonical [[hooks]] tables before installing. Surrounding config bytes were preserved; formatting and comments inside that hooks assignment were normalized.`);
         }
-        // Prune THIS HOST's orphaned, marker-less approval-hook [[hooks]] entries
-        // BEFORE resolving the managed block, so line numbers used for splicing are
-        // computed against the cleaned text. Host-scoped (v1.8.2): after a
-        // kimi-code config rewrite strips marker comments, ANOTHER host's
-        // marker-less table is that host's LIVE hook — pruning it here was the
-        // pre-v1.8.2 seesaw where each host's setup disarmed the other.
+        // Prune only this host's orphaned marker-less entries before computing
+        // splice line numbers. Another host's marker-less table may be its live hook
+        // after a config rewrite strips comments, so it must remain untouched.
         const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
         const { pruned, count: prunedCount, commands: prunedCommands } = pruneOrphanApprovalHooks(inlineHooks.contents, lineEnding, hostId, expectedCommand);
         const existing = pruned;
@@ -265,9 +237,8 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         };
     }
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
-    // nodeExists → a command mismatch is reported as a classified H4 drift
-    // diagnosis (Node upgrade / version-manager switch vs. plugin path move).
-    // hostId → check THIS host's block in the shared config (v1.7.0 scoping).
+    // nodeExists refines mismatch prose into drift classification; hostId checks
+    // only this host's block in the shared config.
     const installedCheck = evaluateInstalled(existing, expectedCommand, {
         hostId,
         nodeExists: (binPath) => existsSync(binPath),
@@ -280,20 +251,15 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
     if (otherHosts.length > 0) {
         warnings.push(`Other host(s) also manage a block in this shared config: ${otherHosts.join(", ")} (coexisting, untouched).`);
     }
-    // Marker-less table triage (v1.8.2): after a kimi-code config rewrite strips
-    // all comments, each host's [[hooks]] table survives unmarked and KEEPS
-    // ENFORCING. Ours-with-the-exact-current-command is the live hook (covered
-    // by the installedCheck note below, not "cruft"); ours-with-a-stale-command
-    // is prunable by this host's setup; another host's is THEIR live hook —
-    // report it informationally and leave it strictly alone.
+    // Config rewrites can strip markers while leaving each host's table enforcing.
+    // Our exact-command table is live; our stale table is prunable; another host's
+    // table is reported but left strictly alone.
     const bareTables = findUnmanagedApprovalHookBlocks(existing);
     const ownStale = bareTables.filter((t) => hostIdFromHookCommand(t.command) === hostId && t.command !== expectedCommand);
     const foreignHosts = [
         ...new Set(bareTables
-            // Exclude any table whose command byte-equals what THIS host writes —
-            // it is unambiguously ours even if a `KIMI_PLUGIN_CC_HOST_ID` override
-            // makes its path-derived host differ from `hostId` (Opus review NIT:
-            // otherwise runCheck would mislabel the host's own table as foreign).
+            // Exact current command bytes identify this host even when a host-id
+            // override disagrees with the path-derived host.
             .filter((t) => t.command !== expectedCommand)
             .map((t) => hostIdFromHookCommand(t.command))
             .filter((h) => h !== null && h !== hostId)),
@@ -383,10 +349,8 @@ async function runCheck(configPath, hookScriptPath, hostId, reviewGateEnabled, w
         nextStep: !probe.ok
             ? "Run /kimi:setup to repair the managed block, or /kimi:setup --uninstall if you want to remove the integration."
             : installedCheck.via === "bare-table"
-                // Enforcement is active via the marker-less table, but the markers are
-                // gone (kimi-code stripped them). Don't say "No action needed" while a
-                // warning tells the user to re-adorn — that contradiction confused
-                // operators (Kimi review F3). Recommend the harmless re-adorn.
+                // Enforcement remains active through the marker-less table, but recommend
+                // re-adorning rather than claiming no action is needed.
                 ? "Enforcement is active. Run /kimi:setup to re-adorn this host's managed-block markers — kimi-code stripped them on its last config write (comments are not preserved). Your hook keeps working meanwhile."
                 : "No action needed.",
         details: buildDetails({
@@ -425,21 +389,14 @@ async function runUninstallLocked(configPath, hookScriptPath, hostId, removeAllH
             }),
         };
     }
-    // Default: remove THIS host's block(s) — its own suffixed block plus any
-    // legacy block whose command path derives to this host — and THIS HOST's
-    // orphaned marker-less hook entries, leaving OTHER hosts' blocks AND their
-    // marker-less tables intact (a marker-less table is likely that host's LIVE
-    // hook after a kimi-code comment strip — v1.8.2 host scoping). `--all`:
-    // remove EVERY host's managed block and every one of our hook tables (the
-    // full nuke).
+    // Scoped uninstall removes only this host's marked and marker-less blocks;
+    // other hosts' blocks and live marker-less tables remain intact. `--all` is
+    // the explicit every-host sweep for all of this plugin's hook tables.
     const { stripped: strippedMarkers, removedBlocks, orphansLeft } = stripManagedBlocks(existing, hostId, removeAllHosts);
     const lineEnding = detectLineEnding(existing);
-    // Pass `expectedCommand` as `alsoMatchCommand` (both scoped and --all) so
-    // uninstall removes THIS host's own current hook table by byte-exact command
-    // even when a `KIMI_PLUGIN_CC_HOST_ID` override disagrees with the command's
-    // path-derived host, or when the hook lives under a non-standard (dev) path
-    // that `isOurApprovalHookCommand` wouldn't recognize — the install path
-    // already does this; uninstall now matches it (Codex P2 / Opus A / Kimi F4).
+    // Exact current command bytes also identify this host's table when a host-id
+    // override disagrees with path derivation or a dev path is outside the strict
+    // ownership pattern.
     const expectedCommand = buildHookShellCommand(hookScriptPath, context.env);
     const { pruned: stripped, count: prunedCount } = pruneOrphanApprovalHooks(strippedMarkers, lineEnding, removeAllHosts ? undefined : hostId, expectedCommand);
     const changed = stripped !== existing;
@@ -498,21 +455,12 @@ async function readConfigSafe(configPath) {
     }
 }
 async function writeConfigAtomic(configPath, contents) {
-    // Two-phase write: write to a sibling temp file, then rename. Each
-    // call uses a unique temp path so two concurrent installs/uninstalls
-    // can race without clobbering each other's intermediate file (PR 4
-    // reviewer finding — fixed-path tmp file was a race surface).
+    // Write a unique sibling temp file and atomically rename it. O_EXCL prevents
+    // concurrent operations from sharing an intermediate path.
     //
-    // Mode: the temp file is created at 0o600 (owner-only read/write) via
-    // O_CREAT|O_EXCL with the mode passed directly to open(), mirroring
-    // createPrivateLockFile in hooks/config-safety.ts. The kimi-code config
-    // file holds API keys and tokens; a writeFile()-then-chmod() sequence
-    // would let the temp file sit briefly at the default umask mode
-    // (typically 0o644, group/world-readable) in between — audit report 28
-    // (Codex M1) tracked the chmod-after-write half of this, but a second
-    // pass found the create-then-tighten window itself. Passing the mode to
-    // open() means the file never exists on disk at anything wider than
-    // 0o600.
+    // Pass 0o600 at creation, not in a later chmod: the config can contain
+    // credentials, so the temp file must never exist with a wider umask-derived
+    // mode.
     await mkdir(path.dirname(configPath), { recursive: true });
     const suffix = randomBytes(8).toString("hex");
     const tmpPath = `${configPath}.kimi-plugin-cc.${process.pid}.${suffix}.tmp`;
@@ -589,13 +537,9 @@ function splitPreservingEnding(contents) {
     return contents.split("\n").map((line) => line.replace(/\r$/, ""));
 }
 /**
- * Remove managed BEGIN/END marker pairs that belong to `currentHost` (or every
- * host when `removeAll`). A block's host is its marker suffix, or — for a legacy
- * un-suffixed block — the host derived from its command path (so a Claude
- * uninstall never removes a `~/.codex/…` legacy block another host still relies
- * on; Kimi review). Orphan marker lines are removed individually (no
- * destructive sweep of trailing content) so `--uninstall` on a corrupted config
- * doesn't take user data with it.
+ * Remove managed blocks owned by `currentHost`, or every host with `removeAll`.
+ * Ownership comes from the marker suffix or a legacy command's derived host.
+ * Orphan markers are removed individually so surrounding user content survives.
  */
 function stripManagedBlocks(contents, currentHost, removeAll) {
     const lineEnding = detectLineEnding(contents);
@@ -603,13 +547,10 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
     const result = [];
     const orphansLeft = [];
     let removedBlocks = 0;
-    // Decide whether a managed block/marker belongs to the host we're uninstalling
-    // for. Suffixed blocks: only the matching host. Legacy (un-suffixed) COMPLETE
-    // blocks: the host derived from the command path — but if the command can't be
-    // attributed (not the canonical two-token shape), leave it (ambiguous
-    // ownership; only `--all` removes it), so a scoped uninstall never destroys
-    // another host's non-canonical block (Codex review). A bare/orphan marker line
-    // has no command and is broken cruft, so a scoped uninstall does sweep it.
+    // Suffixed blocks belong only to the matching host. Complete legacy blocks
+    // use their command-derived host; an unattributable non-canonical command is
+    // ambiguous and only --all removes it. Orphan marker lines have no command
+    // and can be swept individually by a scoped uninstall.
     const shouldRemove = (markerHost, commandPath, isOrphanMarker) => {
         if (removeAll)
             return true;
@@ -685,7 +626,6 @@ function stripManagedBlocks(contents, currentHost, removeAll) {
         result.push(line);
         i += 1;
     }
-    // Collapse runs of >= 3 blank lines created by removal back to 2.
     const collapsed = [];
     let blankRun = 0;
     for (const line of result) {
@@ -725,7 +665,6 @@ function pruneOrphanApprovalHooks(contents, lineEnding, ownedBy, alsoMatchComman
     }
     const lines = splitPreservingEnding(contents);
     const kept = lines.filter((_, idx) => !remove.has(idx));
-    // Collapse runs of >= 3 blank lines created by removal back to 2.
     const collapsed = [];
     let blankRun = 0;
     for (const line of kept) {
@@ -753,15 +692,14 @@ function buildManagedBlock(hookScriptPath, env, lineEnding = "\n", hostId = "") 
     return [
         `${BEGIN_MARKER_PREFIX}${suffix} (v${KIMI_PLUGIN_CC_VERSION}) ===`,
         `# DO NOT EDIT — managed by /kimi:setup. Run /kimi:setup --uninstall to remove.`,
-        `# Host: ${hostId.length > 0 ? hostId : "(legacy)"} — Claude Code and Codex each own a`,
-        `#   separate block in this shared ~/.kimi-code/config.toml; setup in one host`,
-        `#   never touches the other's.`,
+        `# Host: ${hostId.length > 0 ? hostId : "(legacy)"} — each host owns a separate block in this shared`,
+        `#   ~/.kimi-code/config.toml. Scoped setup/uninstall preserves other hosts;`,
+        `#   /kimi:setup --uninstall --all removes every host's block.`,
         `# Purpose:`,
         `#   kimi-code's \`kimi -p\` mode hard-codes permission='auto' and`,
-        `#   auto-approves every tool call. This hook enforces /kimi:review,`,
-        `#   /kimi:challenge, /kimi:review_gate, and /kimi:ask as read-only,`,
-        `#   and applies the workspace-bound rescue allowlist for /kimi:rescue.`,
-        `#   Without this block the plugin's safety contract collapses.`,
+        `#   auto-approves every tool call. This hook enforces each managed command's`,
+        `#   read-only or workspace-bound approval policy. Without this block,`,
+        `#   the plugin's safety contract collapses.`,
         `# Matcher field is intentionally OMITTED — kimi-code compiles the`,
         `#   matcher with \`new RegExp(...)\`. An empty/missing matcher means`,
         `#   "fire for every tool". The string "*" would throw and silently`,
@@ -777,11 +715,9 @@ function buildManagedBlock(hookScriptPath, env, lineEnding = "\n", hostId = "") 
     ].join(lineEnding);
 }
 /**
- * Encode a string for a TOML 1.0 basic string. Escapes the six required
- * escape sequences plus quotes/backslashes. Avoids the `\'` shell-quote
- * hazard that broke the v1.0-alpha.1 prototype: TOML basic strings
- * declare `\'` as a reserved escape, and a parser-compliant TOML
- * library (kimi-code uses smol-toml) raises an error on encounter.
+ * Encode a TOML basic string, including quotes, backslashes, and control
+ * escapes. Raw shell output must not be interpolated directly: TOML reserves
+ * `\'`, and a compliant parser rejects that escape.
  */
 function tomlBasicString(value) {
     const escaped = value
@@ -818,24 +754,18 @@ async function assertHookScriptExists(hookScriptPath) {
     }
 }
 /**
- * Two-layer probe:
+ * Two-layer probe; both layers require exit 2 and a non-empty denial reason.
  *
- *   1. **Direct probe.** Spawn the hook with `process.execPath` (the
- *      same Node binary running the companion) and assert exit 2 +
- *      non-empty stderr. Catches: missing script, broken hook code,
- *      hook misrouting a deny as exit 0. This probe is reliable under
- *      PATH-sanitized smoke tests because it uses an absolute Node
- *      path.
+ *   1. Directly spawn the hook with the absolute path from resolveNodeBinary,
+ *      catching missing/broken scripts and incorrect hook exit behavior without
+ *      relying on PATH.
+ *   2. Execute the exact canonical command from buildHookShellCommand through
+ *      `/bin/sh -c`: two shell-quoted absolute tokens for Node and the script.
+ *      This catches pinned-interpreter execution and quoting failures. It does
+ *      NOT test PATH discovery or compatibility of some other `node` on PATH.
  *
- *   2. **Shell probe.** Run `/bin/sh -c "<nodeBin> <hookScript>"` (the
- *      exact shape kimi-code uses via agent-core hooks/runner.ts) with
- *      synthetic stdin. Catches: kimi-code's shell can't find the
- *      Node binary, shell-quoting in the managed block is wrong, the
- *      Node binary on PATH isn't compatible.
- *
- * Both must pass for the install to be considered healthy. The shell
- * probe is skipped on platforms without `/bin/sh` (Windows pure, etc.) —
- * but the rest of the runtime already assumes POSIX.
+ * The shell layer is skipped where `/bin/sh` is unsupported; the runtime
+ * otherwise assumes POSIX.
  */
 async function probeHook(hookScriptPath, env) {
     const directResult = await probeHookDirect(hookScriptPath, env);
@@ -905,7 +835,6 @@ function spawnProbe(command, args, env, label) {
                 child.kill("SIGKILL");
             }
             catch {
-                // best effort
             }
             resolve({
                 ok: false,
@@ -947,27 +876,11 @@ function truncate(value, max) {
 }
 // ----- Permission rules scan --------------------------------------------
 /**
- * Best-effort scan for `[[permission.rules]]` entries that would
- * interfere with read-only commands. We don't parse TOML; we look for
- * deny rules against common read tools. This recognizes both
- * double-quoted basic strings and single-quoted literal strings, but
- * still misses inline-table and multi-line forms — those are flagged
- * as a known limitation in PR 4 docs.
- */
-/**
- * Probe kimi-code's version and append a warning to `warnings` if the
- * installed kimi is outside the range kimi-plugin-cc was tested
- * against (H6, Codex post-hotfix audit Area 8).
- *
- * Setup soft-fail policy: if the probe itself fails (kimi not on PATH, spawn
- * error, unparseable output), we record nothing here — the hook probe
- * will surface a more direct error in that case. We only loud-warn when
- * the version is **demonstrably** out of range. Setup may still complete,
- * but the model execution-plan gate will refuse that binary before spawn.
- *
- * Override: `KIMI_PLUGIN_CC_SKIP_VERSION_PROBE=1` skips the probe
- * entirely for tests and CI environments without kimi installed. It is not a
- * production compatibility override; model jobs persist it as test-bypass.
+ * Warn only when the installed kimi is demonstrably outside the certified
+ * range. Probe failure records nothing here because the hook probe reports the
+ * more direct problem; setup may finish, but model spawn still refuses an
+ * uncertified binary. KIMI_PLUGIN_CC_SKIP_VERSION_PROBE is a test/CI bypass,
+ * not a production compatibility override.
  */
 async function collectKimiVersionWarnings(env, warnings) {
     if (env.KIMI_PLUGIN_CC_SKIP_VERSION_PROBE === "1")
@@ -991,16 +904,12 @@ async function collectKimiVersionWarnings(env, warnings) {
     warnings.push(formatVersionOutOfRangeWarning(probe, KIMI_PLUGIN_CC_VERSION));
 }
 /**
- * H8 — non-blocking notice listing kimi-code's OWN installed plugins (the
- * user-global plugin system kimi-code 0.4.0+ added; manifest at
- * `~/.kimi-code/plugins/installed.json`, shape verified through 0.12.0:
- * `{ plugins: [{ id, enabled, ... }] }`). kimi-code registers their tools
- * (incl. MCP) on every session. Under kimi-plugin-cc's read-only commands the
- * PreToolUse hook denies any tool outside Read/Grep/Glob, so calls to these
- * plugins' tools are blocked — safe, but they silently burn model turns. We
- * surface that expectation at setup time so a confused "kimi did nothing" report
- * doesn't follow. Best-effort: a missing/unreadable/malformed manifest yields no
- * notice. Never blocks setup; never mutates the plugin list.
+ * Non-blocking notice for kimi-code's own enabled plugins from
+ * ~/.kimi-code/plugins/installed.json. Their tools can register on every
+ * session, but read-only commands deny everything outside READ_ONLY_TOOLS
+ * (Read, Grep, Glob, ReadMediaFile, TaskList, TaskOutput), which can waste model
+ * turns. Missing, unreadable, or malformed manifests produce no notice; setup
+ * never blocks on or mutates the plugin list.
  */
 async function collectInstalledKimiPluginsNotice(env, warnings) {
     const home = resolveKimiHome(env);
@@ -1041,6 +950,11 @@ async function collectInstalledKimiPluginsNotice(env, warnings) {
         "  kimi-code plugins you don't need for delegated work in your kimi-code config.",
     ].join("\n"));
 }
+/**
+ * Best-effort line scan for permission rules that deny common read tools. This
+ * is not a TOML parse: it recognizes basic and literal quoted strings but misses
+ * inline-table and multiline forms.
+ */
 function collectPermissionRuleWarnings(contents, warnings) {
     const lines = contents.split("\n").map((line) => line.replace(/\r$/, ""));
     let inRule = false;

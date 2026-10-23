@@ -8,43 +8,18 @@ import { resolveHostId, tryBuildExpectedHookCommand } from "./install-paths.js";
 import { resolveKimiHome } from "../kimi-home.js";
 
 /**
- * Verify that the kimi-plugin-cc PreToolUse hook is installed and
- * structurally valid in `~/.kimi-code/config.toml`, AND that its
- * `command = "..."` exactly matches the canonical shell command this
- * companion would write for the current env.
+ * Verify the managed PreToolUse hook and require its decoded command to equal
+ * the canonical command for the current environment. The expected command is
+ * always reconstructed; exact equality rejects stale paths and substring
+ * lookalikes that could otherwise fail open upstream.
  *
- * PR 4 hardened the grammar (matcher rejection, duplicate detection,
- * etc.). The pre-tag audit (reports 27 + 28) found two further gaps,
- * both fixed here:
+ * A byte match alone does not prove the hook can run. The verifier also checks
+ * the script for readability and its pinned interpreter for executability,
+ * because a spawn failure is ALLOW to kimi-code's hook runner.
  *
- *   1. Optional `expectedHookPath` parameter → callers (rescue, ask,
- *      review, review-gate) all omitted it, so a managed block
- *      referencing a stale or missing hook script silently passed. The
- *      verifier now ALWAYS reconstructs the expected command from the
- *      current env (via `tryBuildExpectedHookCommand`) and equality-
- *      checks. There is no opt-out short of `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1`.
- *
- *   2. The path check was substring (`commandPath.includes(hookPath)`),
- *      which a crafted command like `true # /path/to/approval-hook.js`
- *      passed: `/bin/sh -c "true # ..."` runs only `true` (exit 0),
- *      which kimi-code's hook runner treats as ALLOW. Equality on the
- *      full canonical shell command closes this.
- *
- *   3. A byte-exact `command` match does not prove the hook can actually
- *      run: if the versioned dist directory (or the whole plugin cache
- *      entry) is pruned after install, the managed block still matches
- *      while kimi-code's `/bin/sh -c '<node>' '<script>'` fails to spawn.
- *      kimi-code's hook runner only treats exit code 2 as a deny — any
- *      other exit (including a spawn/MODULE_NOT_FOUND failure) is ALLOW,
- *      so a missing script silently degrades every refusal gate to full
- *      auto-approve. The verifier now also confirms the hook script file
- *      exists and is readable before blessing a command match as installed.
- *
- * Tests / setup probes can opt out via
- * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` — that bypass disables hook-install
- * refusal gates and the review gate's enforcement check, but cannot bypass the
- * independent experimental-v2 safety refusal in cli-client (documented in
- * `docs/safety.md`).
+ * `KIMI_PLUGIN_CC_SKIP_HOOK_CHECK=1` bypasses hook-install refusal gates and
+ * the review gate's enforcement check for tests/diagnostics. It does not bypass
+ * the independent native-v2 preflight in cli-client.
  */
 export interface HookInstallStatus {
   installed: boolean;
@@ -53,19 +28,13 @@ export interface HookInstallStatus {
   /** Path examined. Useful for the warning message. */
   configPath: string;
   /**
-   * Machine-readable drift classification (see `InstalledCheck.drift`).
-   * Populated ONLY when the block is structurally sound but its command names
-   * different paths — i.e. the recoverable "something moved" case, not
-   * "something is wrong". Absent for every other refusal (unresolvable
-   * command, unreadable config, invalid hook set, duplicate/orphan markers,
-   * missing script): those are NOT re-pin-recoverable and a caller must not
-   * treat them as such.
+   * Machine-readable drift classification (see `InstalledCheck.drift`), present
+   * only when a structurally sound block names different canonical paths.
+   * Other refusals are not re-pin-recoverable and carry no drift.
    *
-   * Consumers: the refusal `RuntimeError.details` on every model-spawning
-   * command, so the LLM caller can run /kimi:setup and retry ONCE instead of
-   * dead-ending. The plugin itself never self-writes from this path — that
-   * design was rejected by two adversarial reviews; see
-   * `.claude/hook-pin-durability-spec-2026-07-25.md`.
+   * The classification is exposed through structured refusal details so a
+   * caller can explicitly run setup and retry when eligible. Verification never
+   * writes config or silently re-pins the hook.
    */
   drift?: HookCommandDrift;
   /**
@@ -133,13 +102,9 @@ export async function verifyHookInstalled(
     };
   }
 
-  // Pass `nodeExists` so a command MISMATCH is classified into an actionable
-  // H4 diagnosis (Node upgrade / version-manager switch vs. plugin path drift)
-  // instead of a raw expected-vs-got dump. Classification only refines the
-  // reason; it never changes the installed=false decision.
-  //
-  // `hostId` selects THIS host's block in the shared config so Claude Code and
-  // Codex verify their own managed block independently (v1.7.0 host scoping).
+  // Classify command mismatches into actionable drift reasons without changing
+  // the installed=false decision. hostId isolates this host's block in the
+  // shared config.
   const check = evaluateInstalled(raw, expected.command, {
     hostId: resolveHostId(env, expected.hookScriptPath),
     nodeExists: (binPath) => existsSync(binPath),
@@ -157,9 +122,8 @@ export async function verifyHookInstalled(
     };
   }
 
-  // The command matched byte-for-byte, but that alone doesn't prove the
-  // hook can run — confirm the script it points at still exists and is
-  // readable (see point 3 above). Fail closed on any stat/access error.
+  // A byte-exact command does not prove the hook can run. Confirm the script
+  // remains readable and fail closed on every access error.
   try {
     await access(expected.hookScriptPath, fsConstants.R_OK);
   } catch {
@@ -170,61 +134,28 @@ export async function verifyHookInstalled(
     };
   }
 
-  // ...and confirm the pinned INTERPRETER is executable.
+  // Confirm the pinned interpreter with a NARROW X_OK backstop. Interpreter
+  // moves that change the recomputed command are already refused as drift; this
+  // check covers only unchanged command bytes whose Node token fails X_OK now:
   //
-  // SCOPE — read this before widening the claim. This is a NARROW BACKSTOP, not
-  // the thing that catches a dead Node. Two adversarial reviews (2026-07-25)
-  // rejected the original, wider rationale, and it was verified empirically:
+  //   1. An absolute KIMI_PLUGIN_CC_NODE_BIN override names a dead interpreter
+  //      other than the running process, so launch never proved it executable.
+  //   2. The interpreter is chmodded after launch. realpathSync still resolves
+  //      it, the preferred path and command bytes stay unchanged, but X_OK fails.
+  //   3. The pathname is removed after launch. realpathSync throws, and the
+  //      execPath fallback can retain the same spelling, so equality still passes
+  //      while the pinned path is gone.
   //
-  //   - It does NOT catch a dangling Homebrew symlink. A dangling symlink cannot
-  //     be exec'd at all, and `command -v node` skips it, so companion.sh (which
-  //     `exec`s the binary it resolves, scripts/companion.sh:34,50) lands on a
-  //     DIFFERENT node. The expected command is recomputed from the live process
-  //     on every call, so it changes, and plain byte-exact equality above
-  //     already refuses — with a RECOVERABLE `drift` that /kimi:setup converges.
-  //   - It does NOT catch the 2026-07-25 dead-node zombie (a config pinning
-  //     ~/.hermes/node). That is a byte mismatch, likewise caught above.
-  //   - On the default path it is close to self-evident: `resolveNodeBinary`
-  //     returns the path THIS process was launched through, which therefore
-  //     existed and was executable moments ago.
+  // Refusing these cases matters because a failed hook spawn is ALLOW upstream.
+  // This per-spawn check also catches degradation since setup's last execution
+  // probe. It proves only the exec bit, not a working Node, architecture, or
+  // version; setup's shell probe executes the byte-identical command instead.
   //
-  // THE EXACT PREDICATE it covers: config and expected command still match
-  // byte-for-byte, yet the Node token embedded in that command fails X_OK AT
-  // VERIFICATION TIME. Three reachable ways to get there:
+  // Fail closed on EVERY access error. Do not harmonize this with spawning code
+  // that ignores selected errnos: a security verifier cannot "try and see".
   //
-  //   1. An absolute `KIMI_PLUGIN_CC_NODE_BIN` naming a binary that is NOT the
-  //      running interpreter and is already dead — e.g. a pinned `nvm` version
-  //      later `nvm uninstall`ed — reached by a direct `node dist/companion.js`
-  //      that bypasses companion.sh's exec+version gate. The override is
-  //      returned verbatim, so it is never proven by the running process.
-  //   2. POST-LAUNCH MUTATION on the DEFAULT path (this one is easy to miss):
-  //      the interpreter is valid at launch, so the process starts, and is then
-  //      `chmod -x`'d. `realpathSync` still resolves it, so `preferStableNodePath`
-  //      keeps argv0 and the bytes are unchanged — equality passes, X_OK fails.
-  //   3. Same, but the pathname is REMOVED after launch. `realpathSync` throws
-  //      and we fall back to `execPath`, which in argv0===execPath layouts
-  //      (nvm/asdf) is the identical spelling — so equality still passes while
-  //      the path is gone.
-  //
-  // In all three the old behavior was installed=true → `/bin/sh -c` exits 127 →
-  // kimi-code reads any non-2 exit as ALLOW. Converting that to a refusal is
-  // the whole value. Cases 2 and 3 are also why setup's stronger execution
-  // probe is not a substitute: it runs at install/--check, whereas this reruns
-  // before every model spawn and so catches degradation since the last probe.
-  //
-  // It proves the exec bit ONLY — not a working Node, not the right arch, not
-  // >=22.5. The real proof is setup's shell probe, which EXECUTES the byte-
-  // identical command (setup.ts::probeHook) and now fails install nonzero. The
-  // verifier runs on every spawn and cannot afford a fork, so it approximates.
-  //
-  // Fail-closed on ANY errno, deliberately diverging from background-spawn.ts,
-  // which ignores errnos outside ENOENT/EACCES/EPERM. Spawning can afford to try
-  // and see; a security verifier cannot. Do not "harmonize" these.
-  //
-  // Not re-pin-recoverable: no `drift` is attached (drift only exists when the
-  // equality check FAILS, so it can never displace a recoverable path), and
-  // `hookRefusalDetails` therefore omits `retryable_after_setup`, which agent
-  // callers map to "surface and stop." Setup cannot conjure a working Node.
+  // This refusal carries no drift and therefore no retryable_after_setup field:
+  // setup cannot repair a broken Node installation.
   try {
     await access(expected.nodeBin, fsConstants.X_OK);
   } catch {
@@ -235,9 +166,6 @@ export async function verifyHookInstalled(
         `cannot spawn (kimi-code reads a failed hook as ALLOW). Repair the Node install, or set ` +
         `KIMI_PLUGIN_CC_NODE_BIN to a valid Node >=22.5 executable and run /kimi:setup.`,
       configPath,
-      // Machine-readable discriminator: this is the ONE refusal whose remedy is
-      // NOT "run /kimi:setup" (LLM-caller discipline — an agent cannot read the
-      // prose above, and every other refusal emits an identical `{config_path}`).
       refusalKind: "node-bin-not-executable",
       nodeBin: expected.nodeBin,
     };
@@ -251,30 +179,10 @@ function resolveKimiCodeConfigPath(env: NodeJS.ProcessEnv): string {
 }
 
 /**
- * Format a stderr-suitable warning message for the missing-hook case.
- * Single source of truth so review.ts / review-gate.ts / ask.ts emit
- * identical language.
- */
-/**
- * Structured `details` payload for a hook-refusal `RuntimeError`. Single source
- * of truth so all five model-spawning commands emit the same machine-readable
- * shape — an LLM caller cannot see stderr, so anything it must act on has to
- * ride the error's structured context (LLM-caller discipline, v0.3.6+).
- *
- * `drift_axis === "hook-script"` is the ONLY value a caller may treat as
- * retryable (run /kimi:setup for this host, retry once). Its absence means the
- * refusal is not a moved-path problem and re-running setup will not fix it.
- */
-/**
- * Caller-facing self-heal protocol, appended to every hook-refusal message.
- *
- * The slash-command wrappers are deliberately thin, so the retry protocol
- * rides the refusal itself — the LLM caller reads it on stdout at exactly the
- * moment it applies, and one source here serves both hosts and all surfaces
- * (commands, agents, Codex skills) without duplicating it in each file.
- * Mirrors the fuller contract in agents/*.md: re-pin via setup, retry ONCE,
- * only on `retryable_after_setup: true` AND a zero setup exit; never the
- * skip env. Embeds the resolved plugin root so the command is runnable as-is.
+ * Caller-facing repair protocol shared by every hook-refusal surface. Re-pin
+ * through the resolved plugin root, retry ONCE only when
+ * `retryable_after_setup` is literally true and setup exits zero, and never use
+ * the skip-check environment variable as a repair.
  */
 export function hookRefusalRetryProtocol(env: NodeJS.ProcessEnv): string {
   const root = env.CLAUDE_PLUGIN_ROOT ?? env.PLUGIN_ROOT ?? "${CLAUDE_PLUGIN_ROOT}";
@@ -286,6 +194,13 @@ export function hookRefusalRetryProtocol(env: NodeJS.ProcessEnv): string {
   );
 }
 
+/**
+ * Structured details for a hook-refusal RuntimeError. `retryable_after_setup`
+ * is present only for drift and is literally true only when setup can re-pin
+ * every differing token: hook-script drift, or node-bin/both drift whose Node
+ * tokens name the same file. A different interpreter is not automatically
+ * repairable. Callers must also require a zero setup exit before one retry.
+ */
 export function hookRefusalDetails(status: HookInstallStatus): Record<string, unknown> {
   return {
     config_path: status.configPath,
@@ -300,16 +215,6 @@ export function hookRefusalDetails(status: HookInstallStatus): Record<string, un
           drift_axis: status.drift.axis,
           drift_installed_command: status.drift.installedCommand,
           drift_expected_command: status.drift.expectedCommand,
-          // Retryable exactly when EVERY differing token is benign:
-          //   - the hook script moved → the install path is version-stamped, so
-          //     setup re-pins it to the running install.
-          //   - the node token changed spelling but names the SAME file → not
-          //     an interpreter move (this is the v1.9.0 re-pin, which also
-          //     moves the script, hence axis "both").
-          // A node token naming a DIFFERENT file is never retryable: the pinned
-          // interpreter may be gone, and a hook that cannot spawn exits 127,
-          // which kimi-code treats as ALLOW. Re-pinning would paper over a real
-          // enforcement gap instead of surfacing it.
           retryable_after_setup:
             status.drift.axis === "hook-script" || status.drift.nodeInterpreterUnchanged === true,
         }
@@ -350,19 +255,12 @@ export function formatHookMissingWarning(
   ].join("\n");
 }
 
-/**
- * Process-lifetime latch so commands don't spam the warning on every
- * call inside a single test run.
- */
+/** Once-per-process latch for missing-hook warnings. */
 let warnedThisProcess = false;
 
 /**
- * Emit the warning to stderr at most once per process.
- *
- * Why stderr rather than stdout: stdout is reserved for the command's
- * load-bearing output (artifact prose, JSON envelopes). LLM-caller
- * discipline says stderr is humans-only, and this warning is exactly
- * that — a developer-facing nudge to run /kimi:setup before tagging.
+ * Emit the warning to stderr at most once per process. Stderr is for humans;
+ * stdout remains reserved for load-bearing command output.
  */
 export function maybeWarnHookMissing(
   status: HookInstallStatus,

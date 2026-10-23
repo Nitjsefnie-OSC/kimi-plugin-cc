@@ -6,7 +6,8 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-As of October 22, 2026, plugin **2.2.2** certifies exact CLI **2.3.0**.
+The current release candidate is plugin **2.3.1**, certifying exact CLI **2.3.1**; publication is pending final repository and CI gates. See the [certification evidence](./upstream-2.3.1-certification.md).
+The previous verified publication was **2.2.2**:
 [Release v2.2.2](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.2.2)
 is anchored at `256e78ff7cbf302fb19e8e523d8e3f943f7cb366`; its
 [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755724024)

@@ -16,12 +16,6 @@ export async function runWorker(argv, context) {
         await executeRescueJob(jobId, prompt, context, { workerPid: process.pid, reusedSession });
         return;
     }
-    // kind === "ask"
-    //
-    // v1.0 note: the ask worker no longer threads `reusedSession` or
-    // `rawPrompt` into executeAskJob — both were inputs to v0.4's
-    // `announceSessionTitle`, which is gone (kimi-web has no PATCH
-    // endpoint). The base64-encoded prompt + job id are sufficient.
     const encodedPrompt = context.env.KIMI_PLUGIN_CC_ASK_PROMPT_B64;
     if (!encodedPrompt) {
         throw new RuntimeError("MISSING_ASK_PROMPT", "Background ask prompt is missing.", "worker");

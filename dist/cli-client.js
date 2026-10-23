@@ -1,17 +1,5 @@
 // Subprocess client for `kimi -p --output-format stream-json`.
 //
-// Replaces runtime/wire/client.ts for v1.0. Both modules coexist during the
-// PR 1-3 transition; PR 4 deletes wire/. The contract is intentionally
-// narrower than the v0.4 wire client — one process per prompt, no in-band
-// approvals (PreToolUse hook handles those), no resumable JSON-RPC channel.
-//
-// Where v0.4 streamed turn events to a TurnCapture state machine,
-// stream-json gives us flattened OpenAI-shaped records that callers
-// reassemble at their own seam. The buffered result is the primary return
-// shape; callers needing incremental visibility (e.g., updating SQLite
-// phase as tools run) can pass `onRecord` to observe records as they arrive
-// without paying for a separate event-stream API.
-//
 // Per-job env (`KIMI_PLUGIN_CC_CMD`) is set on this spawn so the
 // PreToolUse hook can branch per command (review vs rescue vs ask). It is
 // passed via the spawn `env` option, not exported to a shell, so concurrent
@@ -32,12 +20,7 @@ import { collectDescendantIdentities, revalidateProcessIdentities, waitForProces
 const STDERR_TAIL_BYTES = 8192;
 /** Hard cap on awaiting diagnostics log drain before resolving the result. */
 const LOG_DRAIN_TIMEOUT_MS = 250;
-/**
- * Default delay between SIGTERM and SIGKILL when an abort fires.
- * Matches v0.4's `cancellation.ts` escalation timing for wire clients,
- * so rescue/ask/review continue to feel identical to a stuck-kimi user
- * after the v1.0 cutover.
- */
+/** Default 1500 ms delay between SIGTERM and SIGKILL after an abort. */
 const DEFAULT_ESCALATION_MS = 1_500;
 /** Maximum time spent confirming POSIX tree exit after SIGKILL dispatch. */
 const POST_KILL_QUIESCENCE_MS = 500;
@@ -199,11 +182,8 @@ export async function runCliPrompt(opts) {
                 continue;
             }
             if (outcome.unknownRecord !== undefined) {
-                // H3 forward-compat: a stream-json line with a role we don't model
-                // (a future kimi-code role). Log it for diagnostics but keep it OUT of
-                // records[] and out of onRecord — consumers iterate records[] expecting
-                // assistant/tool only. Tolerated, not treated as malformed/error —
-                // EXCEPT that on a native-v2 plan nothing may precede the marker.
+                // Unknown roles are diagnostic-only and excluded from consumer records;
+                // native-v2 still refuses any output before its marker.
                 if (requireMarkerBeforeOutput(`an unknown-role (${outcome.unknownRecord.role}) record`)) {
                     return;
                 }
@@ -216,9 +196,7 @@ export async function runCliPrompt(opts) {
             if (outcome.goalSummary !== undefined) {
                 if (requireMarkerBeforeOutput("goal.summary"))
                     return;
-                // Goal-mode summary is out-of-band metadata for our wrapper, not a
-                // consumer-facing record. First-announce wins (a run emits exactly one,
-                // at session end); capture and skip so records[] stays assistant/tool.
+                // Out-of-band metadata; first-announce-wins, excluded from consumer records.
                 if (announcedGoalSummary === undefined) {
                     announcedGoalSummary = outcome.goalSummary;
                     appendLogLine({
@@ -552,21 +530,12 @@ export async function runCliPrompt(opts) {
             });
         };
         opts.signal?.addEventListener("abort", onAbort, { once: true });
-        // Re-check `aborted` AFTER attaching the listener. `await mkdir` above
-        // is the first synchronous yield point after the pre-spawn aborted
-        // check — if abort fired during that await, the signal is already in
-        // an aborted state by the time we reach addEventListener, which does
-        // NOT re-fire for already-aborted signals (per the AbortSignal spec).
-        // Without this re-check the spawned child is orphaned: SIGTERM/SIGKILL
-        // is never sent and the process keeps holding the SQLite row + model
-        // tokens. Audit report 28 (Codex H1) tracked this fix.
+        // Abort may occur during any pre-spawn await, and addEventListener does not
+        // replay an already-aborted signal. Re-check after attaching the listener so
+        // the spawned child cannot escape cancellation teardown.
         if (opts.signal?.aborted === true) {
             onAbort();
         }
-        // Swap the pre-attached early listener for the real handler. These two
-        // statements are synchronous and execute as one unit; no event can
-        // interleave between marking earlyErrorHandled and attaching the new
-        // listener.
         earlyErrorHandled = true;
         child.on("error", (err) => {
             appendLogLine({ event: "process_error", message: formatError(err) });
@@ -614,7 +583,7 @@ export async function runCliPrompt(opts) {
             await raceWithTimeout(logChain, LOG_DRAIN_TIMEOUT_MS);
             settle("resolve", {
                 spawnedAt,
-                settledAt: 0, // Filled at settlement, after the teardown barrier.
+                settledAt: 0,
                 sessionId,
                 goalSummary: announcedGoalSummary,
                 cliError: announcedCliError,
@@ -722,14 +691,6 @@ export class ResponseTimeoutError extends RuntimeError {
  *
  *   The generic `withTimeout` (runtime/kimi-timeouts.ts) only rejects
  *   the outer Promise — it has no handle on the kimi child process.
- *   review/ask/review-gate previously wrapped `runCliPrompt` with
- *   `withTimeout` and let the orphaned subprocess keep running until
- *   it crashed or finished on its own. The reviewers (reports 17 +
- *   18) flagged this as critical for review_gate in particular: the
- *   8 s budget fires inside Claude Code's Stop hook, the parent
- *   returns "allow stop", and a runaway kimi keeps holding the
- *   SQLite row + model tokens. Subsequent `/kimi:cancel` can't reach
- *   it because `kimi_pid` is null.
  *
  * Behavior:
  *
@@ -811,11 +772,6 @@ function buildArgs(opts) {
             args.push("--skills-dir", dir);
         }
     }
-    // NOTE: thinking effort is requested through the env binding, never CLI argv.
-    // Non-trait-driven providers or a base level already off ignore it silently;
-    // an alwaysThinking model receives off unnormalized. stream-json carries no
-    // thinking deltas (writeThinkingDelta() {} in the JSON writer), so the plugin
-    // cannot observe whether the request was honoured.
     // -p accepts the prompt as the option value. We pass it as a separate argv
     // entry so prompts with leading dashes or whitespace are not interpreted as
     // additional flags.
@@ -826,15 +782,12 @@ function buildEnv(opts) {
     const env = { ...opts.env };
     if (opts.thinkingEffort !== undefined)
         env.KIMI_MODEL_THINKING_EFFORT = opts.thinkingEffort;
-    // 2.2.0 audit: ambient trust starts project MCP stdio servers outside PreToolUse.
+    // Ambient workspace trust starts project MCP stdio servers outside PreToolUse.
     delete env.KIMI_CODE_TRUST_WORKSPACE;
-    // kimi-code 0.33.0 inverted its CLI engine default: an unflagged `kimi -p`
-    // now selects native agent-core-v2, while this upstream-documented flag pins
-    // the legacy-v1 path. Native v2 still has a final-allow plan-file path that
-    // can skip our later external PreToolUse hook, so the engine choice must be a
-    // plugin-owned spawn invariant rather than ambient operator state. Older
-    // kimi-code releases ignore the unknown flag. Always overwrite ambient false
-    // values; accepting one would silently reopen v2 on 0.33+.
+    // Legacy-v1 plans use this flag on releases whose unflagged -p default can
+    // route to native-v2. Always overwrite ambient false values; older releases
+    // ignore it. The engine choice stays plugin-owned, while certified native-v2
+    // plans use the no-plan construction rather than a legacy pin.
     if (opts.executionPlan.intendedEngine === "legacy-v1") {
         env[KIMI_LEGACY_ENV] = KIMI_LEGACY_FORCED_VALUE;
     }
@@ -850,8 +803,6 @@ function buildEnv(opts) {
         env.KIMI_PLUGIN_CC_CMD = opts.commandLabel;
     }
     if (opts.swarmMaxConcurrency !== undefined) {
-        // kimi-code 0.18.0+ caps AgentSwarm's normal-phase concurrency at this
-        // value; older binaries ignore it. See the field doc on CliClientOptions.
         env.KIMI_CODE_AGENT_SWARM_MAX_CONCURRENCY = String(opts.swarmMaxConcurrency);
     }
     if (opts.trustedWorkspaceRoot !== undefined) {

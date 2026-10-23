@@ -3,11 +3,8 @@ const passthroughOutput = "passthrough";
 const parsedOutput = "parsed";
 const DEFAULT_ESCALATION_MS = 1_500;
 /**
- * Build the cancellation config from a short prefix. The prefix is
- * both the title-cased noun ("Ask"/"Rescue"/...) and the SCREAMING
- * uppercase error-code stem ("ASK_"/"RESCUE_"/...). Centralizes the
- * pattern that ask/rescue/review used to inline in three near-identical
- * variants.
+ * Build cancellation config from the display name used verbatim in messages
+ * and the uppercase stem used in error codes.
  */
 function makeCancellationConfig(prefix) {
     const { displayName, errorCodeStem } = prefix;
@@ -28,21 +25,11 @@ function makeCancellationConfig(prefix) {
     };
 }
 /**
- * Single source of truth for per-command behavior. Keyed by
- * `ManagedCommandType` — only commands that actually run the
- * managed-cancellation flow participate. `setup` and `task` are
- * intentionally NOT here: they don't go through the SIGTERM/cancel
- * path that this registry configures, so adding placeholder entries
- * for them would be type-system noise without behavior.
+ * Single source of truth for per-command behavior. Only commands using the
+ * managed-cancellation flow participate; `setup` and `task` do not.
  *
- * Casing note: `ask`, `rescue`, and `review_gate` carry capitalized
- * `displayName` values matching their pre-registry hardcoded strings
- * ("Ask cancelled...", "Rescue failed.", "review_gate cancelled..."
- * for the lowercased compound noun). `review` and `challenge` carry
- * lowercase displayName values to match their pre-registry pattern
- * (the old code interpolated `${commandType}` directly). Mixed casing
- * is established prior art — the registry preserves it rather than
- * homogenizing.
+ * Display-name casing is part of the user-visible contract: `Ask` and `Rescue`
+ * are title-cased, while `review`, `challenge`, and `review_gate` are lowercase.
  */
 export const COMMAND_REGISTRY = {
     ask: {

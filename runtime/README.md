@@ -1,8 +1,8 @@
-# Runtime
+# Kimi companion runtime
 
-The runtime serves both Claude Code and Codex. Each model job starts a local `kimi -p --output-format stream-json` subprocess.
+The Kimi companion runtime powers ask, review, challenge, rescue, pursue, and swarm for Claude Code and Codex. Each model job starts a local `kimi -p --output-format stream-json` subprocess, with per-command safety hooks and an optional review gate.
 
-Plugin 2.0.1 certifies native agent-core-v2 at exact CLI versions `0.42.0`, `0.43.0`, `0.43.1`, and `2.0.0`. Legacy-v1 remains available for explicitly pinned versions in `KIMI_TESTED_MINORS`, through 0.41.x. See [engine certification](../docs/native-v2-certification-provenance.md) for the per-operation matrix.
+Native agent-core-v2 is certified only at the exact CLI versions listed in `kimi-engine.ts`. Legacy-v1 remains available for explicitly pinned versions in `KIMI_TESTED_MINORS`, through 0.41.x. See [engine certification](../docs/native-v2-certification-provenance.md) for the per-operation matrix.
 
 ## Commands
 

@@ -1,8 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { writeFile } from "node:fs/promises";
+import { execFileSync } from "node:child_process";
+import { transform } from "esbuild";
+import { existsSync } from "node:fs";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 
 import { MAX_DURATION_MS, parseSwarmArgs } from "../../runtime/parsing.js";
+import { classifyManagedCommandFailure } from "../../runtime/kimi-errors.js";
 import {
   buildSwarmPrompt,
   buildSwarmWritePrompt,
@@ -14,8 +18,13 @@ import {
   WORKTREE_ORPHAN_TTL_MS,
 } from "../../runtime/commands/swarm.js";
 import { RuntimeError } from "../../runtime/errors.js";
+import { resolveRepoIdentity, removeWorktree } from "../../runtime/git.js";
+import { JobStore, type JobRecord } from "../../runtime/job-store.js";
+import { resolvePluginPaths, type PluginPaths } from "../../runtime/paths.js";
 import type { CommandContext } from "../../runtime/types.js";
-import { cleanupTestPath, createTestPluginDataRoot } from "../helpers/test-env.js";
+import { cleanupTestPath, createGitRepoFixture, createTestPluginDataRoot } from "../helpers/test-env.js";
+
+const mockCliPath = path.join(process.cwd(), "tests/helpers/mock-kimi-cli-v1.ts");
 
 function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
   return {
@@ -24,6 +33,37 @@ function makeContext(cwd: string, env: NodeJS.ProcessEnv): CommandContext {
     stdout: process.stdout,
     stderr: process.stderr,
   };
+}
+
+function makeMockEnv(
+  pluginDataRoot: string,
+  invocationPath: string,
+  kimiHome: string,
+  options?: { scenario?: string; delayMs?: number },
+): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    CLAUDE_PLUGIN_DATA: pluginDataRoot,
+    KIMI_CODE_HOME: kimiHome,
+    KIMI_PLUGIN_CC_KIMI_BIN: "bun",
+    KIMI_PLUGIN_CC_KIMI_PREFIX_ARGS: JSON.stringify(["run", mockCliPath]),
+    KIMI_PLUGIN_CC_MOCK_SCENARIO: options?.scenario ?? "rescue-success",
+    KIMI_PLUGIN_CC_MOCK_INVOCATION_PATH: invocationPath,
+    KIMI_PLUGIN_CC_MOCK_DELAY_MS: String(options?.delayMs ?? 0),
+    KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1",
+  };
+}
+
+async function makeAddNFailureGit(repoRoot: string): Promise<string> {
+  const fakeBin = path.join(repoRoot, "fake-bin");
+  await mkdir(fakeBin, { recursive: true });
+  const realGit = execFileSync("which", ["git"], { encoding: "utf8" }).trim();
+  await writeFile(
+    path.join(fakeBin, "git"),
+    `#!/bin/sh\nif [ "$1" = "add" ] && [ "$2" = "-N" ]; then echo "intent-to-add blocked" >&2; exit 1; fi\nexec ${JSON.stringify(realGit)} "$@"\n`,
+    { mode: 0o755 },
+  );
+  return fakeBin;
 }
 
 describe("parseSwarmArgs", () => {
@@ -256,21 +296,193 @@ describe("runSwarm certified execution-plan gate", () => {
   });
 });
 
+describe("write-swarm lifecycle", () => {
+  test("successful completion preserves the write summary and removes the worktree", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-write-success-data");
+    const repoRoot = await createGitRepoFixture("swarm-write-success-repo");
+    const kimiHome = await createTestPluginDataRoot("swarm-write-success-home");
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    const env = makeMockEnv(pluginDataRoot, invocationPath, kimiHome);
+    const repoId = (await resolveRepoIdentity(repoRoot)).repoId;
+
+    try {
+      const output = await runSwarm(["--write", "prepare", "empty", "patch"], makeContext(repoRoot, env));
+      expect(output).toContain("the swarm made NO changes");
+      const store = new JobStore(resolvePluginPaths(env));
+      let job;
+      try {
+        job = store.findLatestJob({ repoId, commandType: "rescue" });
+        expect(job?.status).toBe("completed");
+        expect(job?.summary).toBe("[swarm-write] prepare empty patch");
+      } finally {
+        store.close();
+      }
+      const worktreePath = path.join(resolvePluginPaths(env).worktreesDir, repoId, `swarm-write-${job!.job_id}`);
+      expect(existsSync(worktreePath)).toBe(false);
+    } finally {
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  });
+
+  test("patch capture failure fails the job and retains the worktree for recovery", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-write-capture-failure-data");
+    const repoRoot = await createGitRepoFixture("swarm-write-capture-failure-repo");
+    const kimiHome = await createTestPluginDataRoot("swarm-write-capture-failure-home");
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    const env = makeMockEnv(pluginDataRoot, invocationPath, kimiHome);
+    const repoId = (await resolveRepoIdentity(repoRoot)).repoId;
+    const fakeBin = await makeAddNFailureGit(repoRoot);
+    const previousPath = process.env.PATH;
+    let worktreePath = "";
+
+    try {
+      process.env.PATH = `${fakeBin}:${previousPath ?? ""}`;
+      await expect(runSwarm(["--write", "force", "capture", "failure"], makeContext(repoRoot, env))).rejects.toMatchObject({
+        code: "SWARM_PATCH_CAPTURE_FAILED",
+        stage: "swarm.patch-capture",
+      });
+      const store = new JobStore(resolvePluginPaths(env));
+      let job;
+      try {
+        job = store.findLatestJob({ repoId, commandType: "rescue" });
+        expect(job?.status).toBe("failed");
+        expect(job?.error?.code).toBe("SWARM_PATCH_CAPTURE_FAILED");
+        worktreePath = job?.error?.details?.worktreePath as string;
+      } finally {
+        store.close();
+      }
+      expect(worktreePath).toBe(path.join(resolvePluginPaths(env).worktreesDir, repoId, `swarm-write-${job!.job_id}`));
+      expect(existsSync(worktreePath)).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (worktreePath) await removeWorktree(repoRoot, worktreePath);
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  });
+
+  test("timeout with capture failure preserves the timeout and includes the recovery path", async () => {
+    const pluginDataRoot = await createTestPluginDataRoot("swarm-write-timeout-capture-data");
+    const repoRoot = await createGitRepoFixture("swarm-write-timeout-capture-repo");
+    const kimiHome = await createTestPluginDataRoot("swarm-write-timeout-capture-home");
+    const invocationPath = path.join(pluginDataRoot, "invocation.jsonl");
+    const env = makeMockEnv(pluginDataRoot, invocationPath, kimiHome, { scenario: "rescue-cancel", delayMs: 5000 });
+    const repoId = (await resolveRepoIdentity(repoRoot)).repoId;
+    const fakeBin = await makeAddNFailureGit(repoRoot);
+    const previousPath = process.env.PATH;
+    let worktreePath = "";
+
+    try {
+      process.env.PATH = `${fakeBin}:${previousPath ?? ""}`;
+      await expect(runSwarm(["--write", "--budget", "1s", "timeout", "capture"], makeContext(repoRoot, env))).rejects.toMatchObject({
+        code: "RESCUE_KIMI_RESPONSE_TIMEOUT",
+        details: { worktreePath: expect.any(String) },
+      });
+      const store = new JobStore(resolvePluginPaths(env));
+      let job;
+      try {
+        job = store.findLatestJob({ repoId, commandType: "rescue" });
+        expect(job?.status).toBe("failed");
+        expect(job?.error?.code).toBe("RESCUE_KIMI_RESPONSE_TIMEOUT");
+        worktreePath = job?.error?.details?.worktreePath as string;
+      } finally {
+        store.close();
+      }
+      expect(existsSync(worktreePath)).toBe(true);
+    } finally {
+      if (previousPath === undefined) delete process.env.PATH;
+      else process.env.PATH = previousPath;
+      if (worktreePath) await removeWorktree(repoRoot, worktreePath);
+      await cleanupTestPath(pluginDataRoot);
+      await cleanupTestPath(repoRoot);
+      await cleanupTestPath(kimiHome);
+    }
+  }, 15_000);
+
+  test("cancellation with capture failure stays cancelled and includes the recovery path", async () => {
+    const source = (await transform(await readFile(path.join(process.cwd(), "runtime/commands/swarm.ts"), "utf8"), {
+      loader: "ts",
+      format: "esm",
+    })).code;
+    const capture = source.slice(
+      source.indexOf("async function capturePatchArtifact"),
+      source.indexOf("function renderWriteSwarmHeader"),
+    );
+    const execute = source.slice(
+      source.indexOf("async function executeSwarmJob"),
+      source.indexOf("\nfunction shorten"),
+    );
+    let retained = false;
+    const job = { job_id: "probe", cwd: "/repo", stream_log_path: "/unused" };
+    const deps = {
+      RuntimeError,
+      classifyManagedCommandFailure,
+      resolvePluginPaths: () => ({ artifactsDir: "/unused" }),
+      ensurePluginPaths: async () => {},
+      JobStore: class {
+        getJob() { return job; }
+        updateRunningJob() {}
+        close() {}
+      },
+      createCliCancellationHandlers: () => ({
+        cancelling: true,
+        signal: new AbortController().signal,
+        dispose() {},
+      }),
+      executionPlanFromPersisted: () => ({ command: "unused", prefixArgs: [] }),
+      runCliPromptWithBudget: async () => {
+        throw new RuntimeError("RESPONSE_TIMEOUT", "budget elapsed", "swarm.prompt");
+      },
+      captureWorktreePatch: async () => {
+        throw new Error("forced capture failure");
+      },
+      markJobFailed: async (_store: JobStore, _paths: PluginPaths, current: JobRecord, error: RuntimeError) => ({ ...current, status: "failed" as const, error }),
+      markJobCancelled: async (_store: JobStore, _paths: PluginPaths, current: JobRecord, _summary: string, error: RuntimeError) => ({ ...current, status: "cancelled" as const, error }),
+    };
+    const build = new Function(
+      "deps",
+      `const {${Object.keys(deps).join(",")}} = deps; ${capture}\n${execute}\nreturn executeSwarmJob;`,
+    );
+    const outcome = await build(deps)(
+      "probe",
+      "prompt",
+      "objective",
+      10,
+      1,
+      { env: { KIMI_PLUGIN_CC_SKIP_HOOK_CHECK: "1" }, stderr: { write() {} } },
+      {
+        workspaceRoot: "/retained-worktree",
+        spawnCwd: "/retained-worktree",
+        onPatchCaptureFailure() { retained = true; },
+      },
+    );
+
+    expect(outcome.status).toBe("cancelled");
+    expect(outcome.error.code).toBe("SWARM_CANCELLED");
+    expect(outcome.error.details.worktreePath).toBe("/retained-worktree");
+    expect(retained).toBe(true);
+  });
+});
+
 describe("buildSwarmPrompt", () => {
   // v1.8.6: the prompt was slimmed after the kimi-code 0.26.0 (k3) coordinator
   // hung when over-prescribed. It now states the read-only goal + report shape
   // and trusts the model to fan out with its own subagent capability, while
-  // still naming the tool constraint (Read/Grep/Glob only, Bash denied) so k3
-  // doesn't stall on a denied preliminary shell call. Safety is unchanged — the
-  // PreToolUse hook (swarm label) enforces read-only regardless of this prose.
-  test("states the read-only goal and the objective", () => {
+  // still naming the allowed read-only tools and Bash denial so k3 doesn't stall
+  // on a denied preliminary shell call. Safety is unchanged — the PreToolUse hook
+  // (swarm label) enforces read-only regardless of this prose.
+  test("states the read-only goal, objective, and allowed inspection tools", () => {
     const prompt = buildSwarmPrompt("review the parser");
     expect(prompt.toLowerCase()).toContain("read-only");
     expect(prompt).toContain("review the parser");
-    // Names the available read tools so the model doesn't reach for shell.
-    expect(prompt).toContain("Read");
-    expect(prompt).toContain("Grep");
-    expect(prompt).toContain("Glob");
+    expect(prompt).toContain("allowed read-only tools");
+    expect(prompt).toContain("Read/Grep/Glob");
+    expect(prompt).toContain("ReadMediaFile where relevant");
+    expect(prompt).not.toContain("Only Read, Grep, and Glob are available");
   });
 
   test("names the Bash denial and steers the fan-out to be the first action (k3 anti-hang)", () => {
@@ -283,9 +495,21 @@ describe("buildSwarmPrompt", () => {
     expect(prompt).not.toContain("prompt_template");
   });
 
-  test("includes a soft cap clause when --cap is set", () => {
+  test("makes --cap a soft total lifetime subagent count, not a parallel count", () => {
     const prompt = buildSwarmPrompt("audit the routes", 4);
-    expect(prompt).toContain("at most 4");
+    expect(prompt).toContain("at most 4 subagents in total");
+    expect(prompt).toContain("across the whole run");
+    expect(prompt).toContain("soft cap");
+    expect(prompt).toContain("split or group targets");
+    expect(prompt).not.toContain("at most 4 parallel subagents");
+  });
+
+  test("consolidates without duplicate findings or dropped empty targets", () => {
+    const prompt = buildSwarmPrompt("audit the routes");
+    expect(prompt).toContain("deduplicate findings");
+    expect(prompt).toContain("preserve coverage");
+    expect(prompt).toContain("targets with no findings");
+    expect(prompt).toContain("rather than dropping them");
   });
 
   test("omits the cap number when --cap is unset", () => {
@@ -313,13 +537,31 @@ describe("buildSwarmWritePrompt", () => {
     expect(prompt.toLowerCase()).toContain("human owns");
   });
 
+  test("separates hook-enforced safety from prompt-only coordination", () => {
+    const prompt = buildSwarmWritePrompt("fix the failing tests");
+    const coordinationMarker = "Coordination rules (prompt-only; the hook does NOT enforce them):";
+    expect(prompt).toContain("Safety rules enforced by the PreToolUse hook");
+    expect(prompt).toContain(coordinationMarker);
+    const [beforeCoordination, coordination] = prompt.split(coordinationMarker);
+    expect(beforeCoordination).toContain("Writes are confined to this worktree");
+    expect(beforeCoordination).toContain("git mutation");
+    expect(beforeCoordination).not.toContain("Keep every assigned target DISJOINT");
+    expect(beforeCoordination).not.toContain("no nested fan-out");
+    expect(coordination).toContain("Keep every assigned target DISJOINT");
+    expect(coordination).toContain("no nested fan-out");
+    expect(prompt).not.toContain("the safety hook enforces these");
+  });
+
   test("does NOT claim read-only (it is the write path)", () => {
     const prompt = buildSwarmWritePrompt("refactor x");
     expect(prompt).not.toContain("READ-ONLY");
   });
 
-  test("carries the soft cap clause like the read prompt", () => {
-    expect(buildSwarmWritePrompt("x", 3)).toContain("at most 3 subagents");
+  test("carries a soft total cap clause like the read prompt", () => {
+    const prompt = buildSwarmWritePrompt("x", 3);
+    expect(prompt).toContain("at most 3 subagents in total");
+    expect(prompt).toContain("across the whole run");
+    expect(prompt).toContain("soft cap");
     expect(buildSwarmWritePrompt("x")).toContain("one subagent per distinct target");
   });
 });

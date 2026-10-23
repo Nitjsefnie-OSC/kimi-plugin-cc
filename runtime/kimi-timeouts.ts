@@ -1,22 +1,8 @@
-// Per-command response-budget constants for the v1.0 cli-client path.
-//
-// v0.4 also exposed startup / initialize timeouts plus a generic
-// `withTimeout` helper. Those existed because the Wire transport had a
-// three-phase lifecycle (spawn → initialize → prompt). The v1.0
-// subprocess transport collapses spawn + prompt into a single
-// `runCliPromptWithBudget` call (see `runtime/cli-client.ts`), and
-// startup failures surface as CLI_SPAWN_FAILED / CLI_PROCESS_ERROR —
-// not as separate timeouts. So only the per-command response budgets
-// remain.
-
-// Budgets accommodate thinking-capable workflows; per-run effort is only a request.
-// kimi-code spends real wallclock on extended reasoning before emitting
-// the first assistant record; pre-alpha.4 budgets (300s/600s) were sized
-// against the non-thinking path and timed out in production smoke
-// testing under default flags. Defaults are now 1800/1800/2700 seconds
-// for ask/review/rescue to allow repo-wide work; review-gate stays at
-// 8s because it fires inside Claude Code's Stop hook and is forced to
-// thinking-off in its own caller.
+// Per-command response budgets leave room for thinking-capable workflows;
+// per-run effort is only a request. Ask/review default to 30 minutes and rescue
+// to 45 minutes for repo-wide work. Review-gate stays at 8 seconds because it
+// runs inside Claude Code's Stop hook and requests thinking off by default;
+// KIMI_PLUGIN_CC_REVIEW_GATE_THINKING can override that request.
 
 /** Ask budget. Conversational; thinking-on free-form reasoning. */
 export const KIMI_ASK_PROMPT_TIMEOUT_MS = 1_800_000; // 30 minutes
@@ -27,8 +13,8 @@ export const KIMI_RESCUE_PROMPT_TIMEOUT_MS = 2_700_000; // 45 minutes
 /**
  * Pursue (autonomous goal mode) DEFAULT wall-clock ceiling when the user
  * passes no `--budget`. This is the ONLY hard bound on an autonomous goal —
- * headless goal create sets no token/turn budget (only the model, via
- * SetGoalBudget, or this AbortController stops the loop). The same duration as
+ * headless goal create sets no token/turn budget, and the managed hook denies
+ * SetGoalBudget. The same duration as
  * the single-turn rescue default, but a safety ceiling rather than a patience
  * knob. Deliberately finite. Overridable per-job via `--budget` (parsed to ms in
  * parsePursueArgs). See runtime/commands/pursue.ts and docs/safety.md.
@@ -55,7 +41,8 @@ export const KIMI_SWARM_DEFAULT_BUDGET_MS = 1_800_000; // 30 minutes
  * KIMI_PLUGIN_CC_REVIEW_GATE_THINKING can inherit or request another effort.
  * BYO/non-trait-driven providers and always-thinking models can ignore it.
  * The 8s timeout remains fail-open; a request never guarantees completion.
- * Hook-enforcement escape is a separate blocking failure. See docs/safety.md.
+ * Hook-escape findings annotate the result and never block or change job outcome.
+ * See docs/safety.md.
  */
 export const KIMI_REVIEW_GATE_TIMEOUT_MS = 8_000;
 

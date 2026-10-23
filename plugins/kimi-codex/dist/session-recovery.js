@@ -2,16 +2,13 @@ import { constants } from "node:fs";
 import { lstat, open, opendir, realpath } from "node:fs/promises";
 import path from "node:path";
 import { digestPrompt } from "./jobs.js";
-// Total entries visited across both enumeration levels. A real store holds a
-// few thousand sessions (2,494 entries on the reference host when this was
-// written, growing by one per plugin run), so the preflight's 4,096 would have
-// switched recovery off within months; the cap is a guard against a
-// pathological tree, not a size budget. opendir streams, nothing is buffered.
-// Dot-entries (`.index-dirty`, `.index-cache`) are upstream index state, never
-// workspaces, and are skipped without being counted. Directories whose mtime
-// predates the spawn cannot have been created by this run and are skipped
-// before any read, so the byte budget scales with concurrent activity, not
-// with store size.
+// Total entries visited across both enumeration levels. The cap guards against
+// a pathological tree rather than budgeting normal store size. opendir streams,
+// so entries are not buffered. Dot-entries (`.index-dirty`, `.index-cache`) are
+// upstream index state, never workspaces, and are skipped without being counted.
+// Directories whose mtime predates the spawn cannot have been created by this
+// run and are skipped before any read, so the byte budget scales with concurrent
+// activity, not with store size.
 const DIR_ENUM_CAP = 65_536;
 const STATE_MAX_BYTES = 1024 * 1024;
 const JOURNAL_PREFIX_BYTES = 4 * 1024 * 1024; // The prompt is argv-bounded (< 1 MiB); the first user message follows a few config records.

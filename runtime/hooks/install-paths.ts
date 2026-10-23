@@ -1,33 +1,10 @@
 // Shared canonical-path helpers for the kimi-plugin-cc PreToolUse hook.
 //
-// Why a separate module:
-//
-//   `runtime/commands/setup.ts` is the installer; `runtime/hooks/install.ts`
-//   is the per-call verifier. Audit (reports 27 + 28) found two
-//   convergent issues:
-//
-//     1. The verifier's drift gate was opt-in (callers had to pass
-//        `expectedHookPath`). rescue.ts called it WITHOUT the path, so
-//        a managed block referencing a stale hook script silently passed.
-//        kimi-code's spawn of the stale path exited 127 (or
-//        MODULE_NOT_FOUND), which the hook runner treats as ALLOW —
-//        rescue's workspace-bound allowlist bypassed in production.
-//
-//     2. Even when callers DID pass `expectedHookPath`, the verifier
-//        used `commandPath.includes(expectedHookPath)` (substring), so a
-//        crafted command like `true # /path/to/approval-hook.js` would
-//        pass: `/bin/sh -c "true # ..."` runs only `true` (exit 0,
-//        no-op allow), then kimi-code treats exit 0 as ALLOW.
-//
-//   Fix: every verifier path now reconstructs the canonical expected
-//   shell command from the resolved Node binary + hook script path, and
-//   does EXACT equality. This module owns the single source of truth for
-//   how that command is built.
-//
-//   Both setup.ts (write side) and install.ts (verify side) import from
-//   here. The probe in setup.ts also uses `buildHookShellCommand` so the
-//   shell probe runs the exact byte string the managed block writes.
-//   These three call sites cannot drift without a compile error.
+// Setup, the shell probe, and the per-call verifier all build the command here.
+// The verifier reconstructs the expected command from the resolved Node binary
+// and hook script, then requires exact equality: a stale path or a substring
+// lookalike must never pass, because a hook that fails to spawn fails open
+// upstream. The probe executes the same bytes that setup writes.
 
 import { createHash } from "node:crypto";
 import { realpathSync } from "node:fs";
@@ -37,34 +14,17 @@ import { fileURLToPath } from "node:url";
 import { RuntimeError } from "../errors.js";
 
 /**
- * Prefer a non-version-stamped path to the SAME Node binary.
+ * Prefer a stable, non-version-stamped path to the SAME Node binary.
+ * Version-stamped interpreter paths change on upgrade and invalidate the
+ * byte-exact managed command, while a missing hook interpreter fails open
+ * upstream.
  *
- * `process.execPath` is fully symlink-resolved, so under Homebrew it is
- * `/opt/homebrew/Cellar/node/<version>/bin/node` — a path that changes on
- * every `brew upgrade node`. The managed block is verified by byte-exact
- * equality, so that churn silently invalidates EVERY host's hook at once and
- * forces a re-run of `/kimi:setup` with no user-visible cause (diagnosed
- * 2026-07-25; a June config backup held `node/26.0.0` and `node/26.3.0`
- * side by side, i.e. this had already fired before).
- *
- * `process.argv0` preserves the path the interpreter was actually invoked
- * with, and `scripts/companion.sh` execs `$(command -v node)` — the stable
- * `/opt/homebrew/bin/node` symlink. Prefer it, but ONLY when it provably
- * denotes the same executable: absolute, and `realpath()`-identical to
- * `process.execPath`. That guard is the whole safety argument — it can never
- * select a DIFFERENT binary, only a more stable NAME for the one already
- * running. Any doubt falls back to `execPath`, so the result is always an
- * absolute path to a real interpreter.
- *
- * Side benefit: this keeps the hook and the companion on the same interpreter
- * by construction, since companion.sh resolves `node` through that same
- * stable name. The old behavior could diverge — companion running the new
- * node while the hook stayed pinned to a Cellar path brew had already
- * deleted, which spawns nothing and (exit 127) reads as ALLOW.
- *
- * Scope: helps symlink-based installs (Homebrew, and any manager exposing a
- * stable `node`). nvm/asdf/mise expose version-stamped paths directly, so
- * argv0 == execPath there and behavior is unchanged, not worse.
+ * `process.argv0` can preserve a stable alias used by companion.sh, but it is
+ * eligible ONLY when absolute and `realpath()`-identical to `process.execPath`.
+ * That guard permits a different name for the running interpreter, never a
+ * different binary. Any error falls back to `execPath`, keeping the result an
+ * absolute path to a real interpreter. Managers that already expose a
+ * version-stamped argv0 simply retain that path.
  */
 export function preferStableNodePath(
   execPath: string,
@@ -156,14 +116,10 @@ export function resolveHookScriptPath(env: NodeJS.ProcessEnv): string {
   const override = env.KIMI_PLUGIN_CC_HOOK_SCRIPT;
   if (override !== undefined && override.length > 0) {
     if (!path.isAbsolute(override)) {
-      // kimi-code spawns hooks via `/bin/sh -c "<command>"` with a
-      // cwd that may not match the companion's. A relative path here
-      // would resolve against the kimi-code shell's working dir at
-      // hook execution time — different from the path resolved at
-      // install time. The mismatch would let the verifier bless a
-      // path that doesn't actually run. Match the NODE_BIN_NOT_ABSOLUTE
-      // contract by requiring an absolute override. Audit re-review
-      // (report 34 Codex MEDIUM) flagged this.
+      // The hook shell's cwd can differ from the companion's. Require an
+      // absolute override so installation, verification, and the runtime spawn
+      // all refer to the same file rather than blessing a relative path that
+      // resolves elsewhere when kimi-code executes it.
       throw new RuntimeError(
         "SETUP_HOOK_SCRIPT_NOT_ABSOLUTE",
         [
@@ -251,7 +207,7 @@ function parseSingleQuotedTokens(input: string): string[] | null {
         // A '...'  quoted segment. Single-quoted content can never contain a
         // literal "'", so the next "'" is always the real close.
         const close = input.indexOf("'", i + 1);
-        if (close === -1) return null; // unterminated quote
+        if (close === -1) return null;
         token += input.slice(i + 1, close);
         i = close + 1;
         consumedAny = true;
@@ -262,7 +218,6 @@ function parseSingleQuotedTokens(input: string): string[] | null {
         i += 2;
         consumedAny = true;
       } else {
-        // A bare unquoted character — not part of the canonical grammar.
         return null;
       }
     }
@@ -273,41 +228,9 @@ function parseSingleQuotedTokens(input: string): string[] | null {
 }
 
 /**
- * H4 — classify a hook-command MISMATCH into an actionable diagnosis. When the
- * managed block is structurally valid but its `command` differs from what this
- * companion would write, the raw "expected X; got Y" dump is hard to act on. The
- * common real cause is environment drift: a Node upgrade or version-manager
- * (nvm/asdf/mise/fnm/Homebrew) switch moved the pinned interpreter, or a plugin
- * update changed the version-stamped hook-script path. This names which token
- * drifted and, for Node, whether the old binary still exists on disk (a gone
- * binary is the unambiguous "your Node moved" signal).
- *
- * Returns `undefined` when it can't classify (either command isn't the canonical
- * two-single-quoted-token shape, or the tokens are somehow equal) — the caller
- * then falls back to the generic mismatch message. Pure except for the injected
- * `nodeExists` predicate (so the fs probe stays at the call site). Does NOT alter
- * the verifier's exact-equality decision — only the human/LLM-facing reason.
- */
-/**
- * Machine-readable sibling of `describeHookCommandDrift`. Same inputs, same
- * parse, but returns WHICH token moved instead of prose — so an LLM caller can
- * branch on `axis` rather than pattern-matching a human sentence (LLM-caller
- * discipline: load-bearing context goes in structured state, never in prose).
- *
- * `"hook-script"` is the recoverable case: install paths are version-stamped,
- * so a plugin update moves it and re-running setup on THAT host re-pins it.
- * `"node-bin"`/`"both"` are reported but deliberately NOT auto-recoverable by
- * a caller retry — a moved interpreter can mean the pinned one is gone, and a
- * hook that fails to spawn exits 127, which kimi-code reads as ALLOW.
- *
- * Returns `undefined` when either command isn't the canonical two-token shape
- * or the commands are equal. Never influences the installed decision.
- */
-/**
- * Do two paths name the same file? Used ONLY to sharpen a drift *message*
- * (distinguishing the v1.9.0 stable-path re-pin from a real interpreter move).
- * Never load-bearing: any throw means "can't tell", and the caller falls back
- * to the more conservative wording.
+ * Do two paths name the same file? Used to distinguish a changed path spelling
+ * from a real interpreter move. Any filesystem error returns false, yielding
+ * the conservative non-retryable classification.
  */
 function defaultSameFile(a: string, b: string): boolean {
   try {
@@ -317,6 +240,18 @@ function defaultSameFile(a: string, b: string): boolean {
   }
 }
 
+/**
+ * Machine-readable classification of a canonical-command mismatch. Returns
+ * which token moved and, for Node, whether both spellings name the same file.
+ *
+ * `"hook-script"` drift is recoverable by running setup on this host.
+ * `"node-bin"`/`"both"` drift is also recoverable when
+ * `nodeInterpreterUnchanged === true`; a token naming a different interpreter
+ * is not automatically repairable. A hook that cannot spawn fails open upstream.
+ *
+ * Returns `undefined` for non-canonical commands or equal tokens. Classification
+ * never changes the verifier's exact-equality decision.
+ */
 export function classifyHookCommandDrift(
   installedCommand: string,
   expectedCommand: string,
@@ -340,14 +275,8 @@ export function classifyHookCommandDrift(
     return undefined;
   }
   const axis = nodeDrift && hookDrift ? "both" : nodeDrift ? "node-bin" : "hook-script";
-  // A node token that changed SPELLING but still names the same file is not an
-  // interpreter move. Distinguishing this matters because it is precisely the
-  // v1.9.0 upgrade shape (the pin moves off the version-stamped path, and the
-  // plugin's own version-stamped script path moves at the same time → `both`),
-  // which every existing install hits exactly once. Without this the caller
-  // would be told "do not retry, the interpreter may be gone" while the human
-  // message says "your Node did not move" — a contradiction where the
-  // structured field, being the load-bearing one, was the wrong half.
+  // A changed Node spelling that still names the same file is path drift, not
+  // an interpreter move; callers use this to decide whether setup may retry.
   return {
     axis,
     installedCommand,
@@ -356,6 +285,13 @@ export function classifyHookCommandDrift(
   };
 }
 
+/**
+ * Describe a canonical-command mismatch in actionable prose: which token moved
+ * and, for Node, whether the installed binary still exists. Returns `undefined`
+ * for non-canonical commands or equal tokens, leaving the generic mismatch
+ * message in place. Pure except for the injected filesystem predicates; never
+ * changes the verifier's exact-equality decision.
+ */
 export function describeHookCommandDrift(
   installedCommand: string,
   expectedCommand: string,
@@ -383,12 +319,8 @@ export function describeHookCommandDrift(
           `spawn the hook and read-only enforcement silently degrades.`,
       );
     } else if (sameFile(installed.nodeBin, expected.nodeBin)) {
-      // Both paths name the SAME interpreter — a spelling change, not a moved
-      // binary. This is the v1.9.0 migration: the pin moved off the
-      // symlink-resolved (version-stamped) path onto the stable one, so every
-      // pre-1.9.0 install drifts exactly once. Blaming a "version-manager
-      // switch between runs" here would be actively misleading — the user
-      // changed nothing about their Node.
+      // Both paths name the same interpreter, so this is a spelling change,
+      // not a version-manager switch or a moved binary.
       parts.push(
         `Node path spelling changed: the installed hook pins ${installed.nodeBin} and this companion runs ` +
           `${expected.nodeBin} — these are the SAME interpreter reached by different paths. Since v1.9.0 the ` +
@@ -502,17 +434,15 @@ export function resolveHostId(
 /**
  * Derive a host id from a hook-script path. `~/.claude/...` → `claude-code`,
  * `~/.codex/...` → `codex` (both literal + version-independent), else a stable
- * `host-<sha1(hookDir)[:8]>` for dev checkouts / unrecognized layouts.
+ * `host-<sha1(hookDir)[:16]>` for dev checkouts / unrecognized layouts.
  */
 export function hostIdFromHookScript(hookScriptPath: string): string {
   const norm = hookScriptPath.split(path.sep).join("/");
   if (norm.includes("/.claude/")) return "claude-code";
   if (norm.includes("/.codex/")) return "codex";
-  // Dev checkouts are not version-stamped, so hashing the hook's directory is
-  // stable across runs (and across plugin upgrades, which don't move it). Use
-  // 16 hex chars (64 bits): an 8-char prefix is only 32 bits, where two
-  // distinct dev roots can collide (Codex review found a concrete pair) and the
-  // second setup would treat the first host's block as its own and clobber it.
+  // Hashing the hook directory is stable for dev checkouts. Sixteen hex chars
+  // avoid the collision risk of a 32-bit prefix, which could make one root
+  // treat another root's managed block as its own.
   const digest = createHash("sha1").update(path.dirname(hookScriptPath)).digest("hex");
   return `host-${digest.slice(0, 16)}`;
 }
@@ -533,21 +463,10 @@ export function slugifyHostId(value: string): string {
 }
 
 /**
- * True when a (decoded) hook `command` string is unambiguously THIS plugin's
- * approval hook — a canonical two-single-quoted-token command whose script is
- * `approval-hook.js` living under a `kimi-plugin-cc` / `kimi-marketplace`
- * install tree. Used to prune orphaned, marker-less `[[hooks]]` entries left by
- * older installs. Deliberately strict: a hand-rolled or non-canonical command
- * returns false, so we never remove a user's own hook.
- */
-/**
- * Derive the host id that OWNS a hook command, from its script path — the
- * host-scoped counterpart of `hostIdFromHookScript`. Returns `null` when the
- * command isn't the canonical two-single-quoted-token shape (a stale/bare
- * legacy command whose owner can't be determined). Callers treat `null` as
- * "claimable by the current host." Lets a legacy (un-suffixed) block be
- * attributed to whichever host actually wrote it, so one host's `/kimi:setup`
- * never adopts or removes another host's block.
+ * Derive the owning host id from a canonical hook command's script path.
+ * Returns `null` for a non-canonical command whose owner cannot be determined;
+ * scoped cleanup treats that as ambiguous rather than claiming another host's
+ * block.
  */
 export function hostIdFromHookCommand(command: string): string | null {
   const parsed = parseHookShellCommand(command);
@@ -555,14 +474,19 @@ export function hostIdFromHookCommand(command: string): string | null {
   return hostIdFromHookScript(parsed.hookScript);
 }
 
+/**
+ * True only for a canonical two-single-quoted-token command whose script is
+ * `approval-hook.js` under a kimi-plugin-cc/kimi-marketplace install tree.
+ * This strict ownership test protects hand-rolled and non-canonical user hooks
+ * from orphan pruning.
+ */
 export function isOurApprovalHookCommand(decodedCommand: string): boolean {
   const parsed = parseHookShellCommand(decodedCommand);
   if (parsed === null) return false;
   const script = parsed.hookScript.split(/[\\/]/);
   if (script[script.length - 1] !== "approval-hook.js") return false;
   const normalized = parsed.hookScript.replace(/\\/g, "/");
-  // Require a real path SEGMENT, not an arbitrary substring — otherwise a
-  // user hook at `/opt/acme/kimi-plugin-cc-wrapper/approval-hook.js` would be
-  // misclassified as ours and pruned. (Codex review.)
+  // Require a real path segment, not an arbitrary substring, so a user hook in
+  // a similarly named wrapper directory is never misclassified and pruned.
   return normalized.includes("/kimi-plugin-cc/") || normalized.includes("/kimi-marketplace/");
 }

@@ -12,29 +12,10 @@ import { sweepStaleJobs } from "../jobs.js";
 
 /**
  * Replay a completed job from its persisted stream-json diagnostics log.
- *
- * v1.0 log format (`runtime/cli-client.ts`):
- *
- *   Each line is a JSON object with a `ts` timestamp and an `event`
- *   discriminator. The events we care about:
- *
- *     {"ts":"...","event":"spawn", ...}
- *     {"ts":"...","event":"record","record":{"role":"assistant","content":"..."}}
- *     {"ts":"...","event":"record","record":{"role":"assistant","tool_calls":[...]}}
- *     {"ts":"...","event":"record","record":{"role":"tool","tool_call_id":"...","content":"..."}}
- *     {"ts":"...","event":"malformed","line":"...","reason":"..."}
- *     {"ts":"...","event":"process_error", ...}
- *     {"ts":"...","event":"exit","exit_code":0,"session_id":"...", ...}
- *
- *   This file format is OURS — written by cli-client when `logPath` is
- *   set. Replay only needs the assistant `content` chunks; tool_calls
- *   and tool responses are diagnostic and don't change the rendered
- *   artifact.
- *
- * v0.4 wire-format logs are NOT supported. The wire transport went
- * away in v1.0 along with the kimi-cli binary, and the new replay
- * source is this stream-json log. Jobs created under v0.4 produce a
- * REPLAY_LOG_UNREADABLE error explaining the cutover.
+ * Each line is a timestamped JSON event written by cli-client. Replay consumes
+ * assistant `content` from `record` events; tool calls, tool responses, and
+ * other events remain diagnostic. Legacy Wire logs are unsupported and produce
+ * REPLAY_LOG_UNREADABLE.
  */
 
 export interface ReplayResult {

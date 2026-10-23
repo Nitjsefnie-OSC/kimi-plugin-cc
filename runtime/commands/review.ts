@@ -31,34 +31,6 @@ import {
 import { captureTimeoutPartialOutput, assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
-// v1.0 cutover note (PR 2):
-//
-//   Replaced the v0.4 wire client + initialize + prompt sequence with a
-//   single `runCliPrompt` call against `kimi -p --output-format
-//   stream-json`. The PreToolUse hook (installed via /kimi:setup) reads
-//   `KIMI_PLUGIN_CC_CMD=review` (or `=challenge`) and denies anything
-//   but Read/Grep/Glob — so the read-only contract that v0.4 enforced
-//   via WireClient.approvalPolicy is now enforced out-of-band by the
-//   hook. The command no longer needs to wire its own approval policy.
-//
-// What stays:
-//
-//   - SQLite job store, prompt digest, artifact rendering, withTimeout
-//     for the prompt phase.
-//   - Cancellation: still SIGTERM/SIGINT-driven, but via AbortController
-//     instead of WireClient.cancel().
-//   - Job error classification via classifyManagedCommandFailure.
-//
-// What's gone:
-//
-//   - announceSessionTitle — vis-server has no PATCH endpoint; the
-//     kimi-web title cannot be written from the plugin in v1.0.
-//   - agent_profile — kimi-code doesn't load YAML agent profiles. The
-//     SQLite column stays for backward compatibility; we write a
-//     placeholder "<cli-client>" until PR 4 makes it nullable.
-//   - KIMI_INITIALIZE_TIMEOUT_MS / KIMI_START_TIMEOUT_MS — there's no
-//     separate initialize/start phase under -p mode.
-
 const REVIEW_AGENT_PROFILE_PLACEHOLDER = "<cli-client>";
 
 export async function runReview(
@@ -92,10 +64,8 @@ export async function runReview(
   const store = new JobStore(paths);
 
   const jobId = randomUUID();
-  // kimi-code mints the actual session id and announces it on stderr;
-  // we leave the row's kimi_session_id NULL until the call returns to
-  // avoid storing a fictional id that no on-disk session matches.
-  // (See PR 2 review feedback in reports/17-pr2-claude-review.md.)
+  // Leave kimi_session_id NULL until kimi announces an actual ID; never invent
+  // one that no on-disk session matches.
   const reviewSessionId: string | null = null;
   const logPath = path.join(paths.logsDir, `${commandType}-${jobId}.jsonl`);
   const previewPrompt = buildReviewPrompt(commandType, reviewContext, parsed.focus);
@@ -167,10 +137,7 @@ export async function runReview(
     // but the id is the only handle for post-hoc replay against
     // ~/.kimi-code/sessions/.
     if (result.sessionId !== undefined && result.sessionId.length > 0) {
-      // Tighten on length>0 so a degenerate empty-string capture doesn't
-      // poison the row — consumers reading SQLite distinguish "missing"
-      // (NULL) from "captured" (non-empty UUID) only via NULL-ness.
-      // (Kimi alpha.4 challenge finding #3.)
+      // Never persist an empty ID because NULL represents a missing session ID.
       store.updateRunningJob(job.job_id, { kimi_session_id_source: "announced", kimi_session_id: result.sessionId });
     }
     await syncKimiSessionTitle({
@@ -262,24 +229,50 @@ function buildReviewPrompt(
   const modeInstructions =
     commandType === "challenge"
       ? [
-          "Take a challenging stance.",
-          "Challenge assumptions, identify brittle design choices, and surface safer alternatives.",
+          "Steelman the current approach first, then challenge its assumptions, brittle design choices, and alternatives.",
+          "Say when the current approach is preferable instead of assuming change is necessary.",
         ]
       : ["Focus on concrete bugs, regressions, and missing safeguards in the supplied changes."];
+  const hasReviewInputs = reviewContext.scope === "base"
+    ? reviewContext.diffText.trim().length > 0
+    : reviewContext.diffText.trim().length > 0 || reviewContext.statusSummary.length > 0;
+  const hasUntrackedInputs = reviewContext.scope === "working-tree" &&
+    reviewContext.statusSummary.split("\n").some((line) => line.startsWith("?? "));
+  const baseTreeDirty = reviewContext.scope === "base" &&
+    reviewContext.statusSummary.split("\n").some((line) => line.length > 0 && !line.startsWith("?? "));
+  const inspectionInstruction = reviewContext.scope === "working-tree"
+    ? "Read each complete changed file, relevant surrounding code, and related tests rather than reviewing only the diff excerpt."
+    : baseTreeDirty
+      ? "Treat the supplied branch diff as the source of truth. Current working-tree files may differ; do not use their contents or line numbers as evidence for committed changes."
+      : "Read each complete changed file at HEAD, relevant surrounding code, and related tests rather than reviewing only the diff excerpt.";
 
   return [
     "Perform a read-only code review of the supplied repository changes.",
     ...modeInstructions,
-    "Use repository read tools as needed, but do not attempt any write, shell, background, or delegated operations.",
-    "Return your review as plain markdown — a short verdict line (approve / concern / block), then a brief summary, then one section per finding with file:line refs. No JSON wrapper, no code fences around the whole response.",
-    "If the supplied diff context is empty or shows no changes to review, return immediately with a one-line note that there were no changes — do not explore the repository.",
+    "Use only the allowed repository read tools; do not use shell/Bash, writes, background tasks, or delegated operations.",
+    hasReviewInputs ? inspectionInstruction : undefined,
+    "Return plain markdown with a short verdict line (approve / concern / block), a brief summary, and findings with file:line references.",
+    "For every finding, provide concrete evidence, impact, severity, and confidence. Do not manufacture findings; if there are none, say so honestly and note residual verification gaps.",
+    "Do not emit JSON or wrap the whole response in code fences.",
+    hasReviewInputs
+      ? undefined
+      : "There are no changes in the declared review scope. Return immediately with a one-line note that there were no changes; do not explore the repository.",
+    hasUntrackedInputs
+      ? "Files marked ?? in git status are untracked review inputs absent from the unified diff; read their complete contents with allowed read tools."
+      : undefined,
+    reviewContext.diffTruncated
+      ? baseTreeDirty
+        ? "The unified diff is truncated, and the dirty working tree cannot supply reliable committed snapshots. Do not claim full coverage; report the omitted hunks as a verification gap."
+        : "The unified diff is truncated. Inspect all omitted hunks and files with allowed read tools before claiming full coverage, and report any remaining verification gaps."
+      : undefined,
     focus ? `Review focus: ${focus}` : undefined,
     "",
     `Target: ${reviewContext.targetDescription}`,
+    `Scope: ${reviewContext.scope === "base" ? "branch diff only; all working-tree changes are out of scope" : "current working tree, including tracked and untracked changes"}`,
     `Repository root: ${reviewContext.repoRoot}`,
-    "",
-    "git status --short:",
-    reviewContext.statusSummary || "(clean)",
+    ...(reviewContext.scope === "working-tree"
+      ? ["", "git status --short:", reviewContext.statusSummary || "(clean)"]
+      : []),
     "",
     "Unified diff context:",
     reviewContext.diffText || "(no diff text available)",

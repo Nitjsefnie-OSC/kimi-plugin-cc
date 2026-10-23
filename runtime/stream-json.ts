@@ -10,164 +10,13 @@
 //   {"role":"tool","tool_call_id":"...","content":"..."}
 //   {"role":"meta","type":"session.resume_hint","session_id":"session_<uuid>","command":"kimi -r session_<uuid>","content":"To resume this session: kimi -r session_<uuid>"}
 //   {"role":"meta","type":"turn.step.retrying","failed_attempt":1,"next_attempt":2,"max_attempts":3,"delay_ms":300,"error_name":"APIProviderRateLimitError","error_message":"...","status_code":429}
-//   {"role":"meta","type":"system.version","version":"0.24.2"} // experimental v2 only; modeled since v1.8.5 (SystemVersionRecord), filtered like other meta
+//   {"role":"meta","type":"system.version","version":"0.24.2"} // native-v2 marker; required first on native-v2 plans and filtered after capture
 //
 //   {"type":"error","code":"session.occupied","message":"...","details":{...}} // 2.3.0; stdout-only refusal, exit 4
 //
 // Notes on what does and does not appear here:
-//   - The session.resume_hint meta record is NEW in kimi-code 0.2.0
-//     (introduced at run-prompt.ts:477-505 in 0.2.0; the writer region —
-//     `PromptJsonResumeMetaMessage` / `writeResumeHint` / `PromptJsonWriter` —
-//     sits at apps/kimi-code/src/cli/run-prompt.ts:567-696 as of 0.9.0 and is
-//     verified compatible through 0.24.2. 2026-05-27 audit covered 0.4.0,
-//     2026-05-28 audit covered 0.5.0 (run-prompt.ts zero-byte diff across
-//     both), 2026-05-31 audit covered 0.6.0, 2026-06-03 audit covered
-//     0.7.0/0.8.0/0.9.0 in one cumulative pass, 2026-06-09 audit covered
-//     0.10.0/0.11.0/0.12.0 in one cumulative 0.9.0→0.12.0 pass, 2026-06-12 audit
-//     covered 0.12.1/0.13.0/0.13.1/0.14.0/0.14.1 in one cumulative 0.12.0→0.14.1
-//     pass (records/ dir empty diff; the 0.13/0.14 packages/protocol/ REST+WS
-//     control API is a separate transport — run-prompt.ts imports none of it,
-//     `-p` stdout stays the direct PromptJsonWriter), 2026-06-13 audit covered
-//     the 0.14.2 patch (records/ + the PromptJsonWriter/writeResumeHint region
-//     both 0-byte; the patch is a repo-wide `.md`→`.md?raw` bundler-import
-//     migration plus a Bash-tool stdout/stderr streaming callback, neither
-//     touching the writer), and 2026-06-14 covered the 0.14.3 patch (all four
-//     scoped diffs 0-byte; the entire patch is a TUI model-picker
-//     provider-refresh change — PR #713 — off the `-p` path), and 2026-06-16
-//     covered the 0.15.0 minor (permission/hooks/run-prompt/cli all 0-byte by
-//     independent `git diff` byte-count; the only scoped change is records/ +
-//     session/ persistence churn — PR #786 drops app_version/resumed from the
-//     .records/ metadata artifact, a SessionSkillRegistry rename, a static
-//     model-capability lookup — none of it on the `-p` stdout stream; plus an
-//     additive `transport:'sse'` MCP config variant the plugin never writes),
-//     and 2026-06-17 covered the 0.16.0 minor (permission/hooks/run-prompt all
-//     0-byte; the only argv change registers a new `kimi vis` subcommand off
-//     the `-p` path, and the records/replay/compaction/logging churn is
-//     internal — not on the stdout stream; GREEN smoke 7/0 on the 0.16.0
-//     binary), 2026-06-19 covered the 0.16.0→0.18.0 jump (0.17.0/0.17.1/0.18.0;
-//     03-hooks.diff 0-byte, run-prompt.ts only a telemetry refactor outside the
-//     writer, the sole permission change a NON-auto-mode GoalStartReviewAsk that
-//     is dead on `-p`), and 2026-06-23 covered the 0.18.0→0.19.1 minor (the
-//     writer + records/ 0-byte; the bumping feature #812 `--add-dir` touches
-//     only an approve policy at the queue tail, structurally dead below the
-//     `-p` auto-mode approve and still pre-empted by our index-0 hook even when
-//     project-local `.kimi-code/local.toml` makes additionalDirs non-empty;
-//     #963's new `turn.ended` reason:'filtered' is a failure REASON not a new
-//     stdout record SHAPE;
-//     GREEN smoke 9/0 on the operator's 0.19.1 binary —
-//     .claude/kimi-code-research/reports/85-upstream-0191-surface.md), and
-//     2026-06-26 covered the 0.19.1→0.20.0 minor (run-prompt.ts + options.ts +
-//     records/ all 0-byte; #1040's new `warning` agent event is swallowed on `-p`
-//     at run-prompt.ts:495 `case 'warning': return;`, so it never reaches this
-//     parser; #1062's tool-result budget adds a `truncated` flag to tool-result
-//     CONTENT, not the record SHAPE; the new runShellCommand RPC + kimi server/web
-//     stack are off the `-p` path — report 88. Smoke NOT run this cert: the 0.20.0
-//     `bun run smoke:real` was quota-blocked, 403 usage-limit, records:[] — an
-//     operator-billing false alarm, not a compat break; certified on source audit;
-//     the later 0.20.2 smoke ran GREEN 9/0 on 2026-06-29), and 2026-07-01
-//     covered the 0.20.3→0.21.1 minor+patch (report 93; agent/records/ 0-byte,
-//     run-prompt.ts writer/resume_hint/goal.summary unchanged, #1204 plugin
-//     slash commands off the `-p` path, #1233 cleanup timeout after the writer
-//     flush; GREEN smoke 9/0 on the operator's 0.21.1 binary), and 2026-07-05
-//     covered the 0.21.1→0.22.3 minor+patch (reports 94/95; hook engine
-//     unchanged, policy order still hook-first, writer shape compatible; 0.22.3's
-//     prompt-mode background-drain happens after assistant-output flush and is
-//     bounded by plugin budgets; shell-output caps and session-owned
-//     media-originals do not alter the NDJSON record schema; GREEN smoke 9/0 on
-//     a temp-installed 0.22.3 binary), and 2026-07-07 covered the
-//     0.22.3→0.23.1 minor (report 96; hook engine unchanged, policy order still
-//     hook-first, PromptJsonWriter-compatible scoped `run-prompt.ts` delta only
-//     adds telemetry sessionId; `select_tools` is denied by our hook unless
-//     deliberately allowlisted; observability records are persisted agent-log
-//     records, not new stdout NDJSON shapes; GREEN smoke 9/0 on a temp-installed
-//     0.23.1 binary), and 2026-07-08 covered the 0.23.2 patch (daily checkup;
-//     no writer/resume_hint/goal.summary drift, `02-permission.diff` and
-//     `05-session-bootstrap.diff` 0-byte; the only scoped `run-prompt.ts`
-//     change keeps the cleanup timeout ref'd so failed headless `-p` turns exit
-//     non-zero reliably, and the only hook-engine-adjacent change adds
-//     `windowsHide:true` to hook child-process spawn options on Windows; GREEN
-//     smoke 9/0 on a temp-installed 0.23.2 binary), and 2026-07-09 covered the
-//     0.23.3/0.23.4 patches (daily checkup; permission + both hook-tree diffs
-//     0-byte; #1516 keeps prompt-mode goals alive across continuation turns
-//     until terminal without changing PromptJsonWriter, session.resume_hint,
-//     or goal.summary shapes; the wire/session delta is internal provider-auth
-//     and media-projection plumbing, while the bootstrap delta adds `[image]`
-//     limits without changing hook or permission construction; GREEN smoke 9/0
-//     on a temp-installed 0.23.4 binary, including two-minute multi-turn goal
-//     confinement and both write-swarm worktree-boundary assertions), and
-//     2026-07-11 covered the 0.23.5 patch at tag commit `352a4492`
-//     (permission, both hook trees, and session bootstrap all 0-byte; the wire
-//     diff only adds the internal `media-stripped` projection type). The one
-//     live stdout change is this file's `turn.step.retrying` meta record: it is
-//     modeled exactly and filtered from consumer records while malformed shapes
-//     remain diagnostic. The post-change exact-binary smoke was GREEN 9/0 in
-//     229.56s, including the full goal budget and both write-swarm boundaries),
-//     and 2026-07-12 covered the 0.23.6 patch at tag commit `b5c236d0`
-//     (permission and both hook trees 0-byte; no new PromptJsonWriter record;
-//     `run-prompt.ts` now keeps print mode alive across active goals, pending
-//     cron fires, and opt-in background steering, all still bounded externally
-//     by plugin budgets; subagent timeout config and the capability rename to
-//     dynamically_loaded_tools do not alter stdout shape). Exact-binary smoke
-//     was GREEN 9/0 in 274.55s, including the full goal budget and both
-//     write-swarm boundaries), and 2026-07-15 covered the 0.23.6→0.24.2
-//     minor (Phase-1 reports 97-100; permission and the live session/hooks
-//     surfaces 0-byte; default-v1 writer/resume/retry/goal shapes compatible;
-//     GREEN exact-binary v1 smoke 9/0, 39 assertions in 261.33s). A truthy
-//     native v2 shares the writer shapes and terminal session.resume_hint but
-//     prepends one new
-//     role:"meta", type:"system.version" record. Unknown meta is intentionally
-//     non-fatal: it becomes diagnostic-only, never enters records[]/onRecord,
-//     and cannot affect prose or session pinning. A targeted exact-v2 review
-//     smoke denied the forced write (1 pass / 8 skip / 0 fail).
-//     2026-07-16 covered 0.25.0 + 0.26.0 (the 0.25.0 step added only 943 B
-//     of permission telemetry; all three primary safety surfaces were 0-byte
-//     on the 0.26.0 step; no new PromptJsonWriter record on either),
-//     2026-07-18 covered 0.27.0, 2026-07-21 covered 0.28.1,
-//     2026-07-23/24 covered 0.29.0 + 0.29.1, and 2026-07-27 covered 0.29.2
-//     (permission/hooks stayed 0-byte across every step; the 0.29.x
-//     wire/bootstrap changes did not alter PromptJsonWriter output; GREEN
-//     exact-binary smoke 10/0, 43 assertions, on each of exact 0.27.0,
-//     0.28.1, 0.29.0, 0.29.1, and 0.29.2; the 0.29.1 veto-event refactor
-//     and 0.29.2 automatic scope-activation refactor preserved the modeled
-//     system.version signal and terminal session pinning), 2026-07-29 covered
-//     0.30.0, 2026-07-31 covered 0.31.0, 2026-08-01 covered 0.31.1, and
-//     2026-08-08 covered 0.32.0 through 0.34.0, 2026-08-12 covered 0.35.0,
-//     2026-08-13 covered 0.36.0, 2026-08-24 covered 0.37.0 through
-//     0.38.0, 2026-08-27 covered 0.39.0 (prompt-render.ts byte-identical;
-//     the MCP structured-content and error-code changes shift only prose
-//     inside opaque tool content strings), and 2026-09-02 covered 0.40.0
-//     (wire/session scope 0 bytes; run-prompt.ts absent from the diff). The
-//     2026-09-06 covered 0.41.0 (v1 core, prompt-render.ts, goal-prompt.ts,
-//     and prompt-session.ts unchanged; exact-binary smoke 12/0, 55 assertions).
-//     The legacy-v1 writer remains compatible through 0.41.0;
-//     custom profiles can change content/tools but
-//     not the NDJSON envelope. In 0.33.0 native v2 became the unflagged default,
-//     so v1.9.6 forces KIMI_CODE_LEGACY_FLAG=1 in every accepted child while
-//     retaining the old experimental-selector refusal. This parser continues
-//     to model v2's system.version record for diagnostics and a future safe
-//     re-enable; absence of that record is now a legacy-pin smoke assertion.
-//     NB: from 0.6.0 run-prompt.ts
-//     is no longer a whole-file zero-byte diff — at 0.6.0 it gained a
-//     resume-session workDir guard, and at 0.8.0 it gained headless goal
-//     mode (`runHeadlessGoal`) — but both changes are OUTSIDE the
-//     stream-json writer, which every audit confirmed byte-identical by
-//     content/blob SHA. Goal mode also writes a `{"type":"goal.summary",...}`
-//     line (no `role` field) before the resume hint when the prompt is
-//     `/goal`-prefixed (on 0.8–0.11 the `goal-command` experimental flag must
-//     also be on; 0.12.0 removed that gate — PR #569 — so the `/goal` prefix
-//     alone triggers it). Read-only commands never trigger it (their trimmed
-//     prompt never starts with `/goal`); the v1.1 /kimi:pursue command is
-//     the intentional consumer — it is recognized as a first-class record on
-//     the dedicated `StreamJsonOutcome.goalSummary` channel (see
-//     GoalSummaryRecord below), NOT routed to the malformed channel. See
-//     reports 47-65, 72-76).
-//     The hint is emitted once per prompt run at session END
-//     (after runPromptTurn settles), not at session start. In 0.1.x the
-//     resume hint went to stderr only; 0.2.0+ emits a structured
-//     stream-json record on stdout when `--output-format stream-json` is
-//     selected (text-output mode still writes the stderr line). Our
-//     cli-client consumes the meta record's `session_id` for resume/replay
-//     routing.
+//   - session.resume_hint is emitted once at session end. Legacy 0.1.x sent
+//     the resume hint to stderr; stream-json uses this stdout meta record.
 //   - hook.result events arrive as role:"assistant" with the block rendered as
 //     plain text (see formatHookResultPlain in run-prompt.ts). Our
 //     PreToolUse hook's deny reason therefore surfaces in the assistant
@@ -201,17 +50,11 @@ export interface ToolResultRecord {
 }
 
 /**
- * Meta record emitted by kimi-code 0.2.0+ in stream-json mode to announce
- * the session id for resume/replay. In 0.1.x the same information went
- * to stderr as a plain "To resume this session: kimi -r <uuid>" line; the
- * stream-json move makes the announcement reliably parseable even when
- * stderr is captured at coarse granularity or muted by the caller.
+ * Meta record announcing the session id for resume at session end.
+ * Legacy 0.1.x used stderr; stream-json uses this stdout record.
  *
- * Source: apps/kimi-code/src/cli/run-prompt.ts::writeResumeHint.
- *
- * The session_id payload uses kimi-code 0.2.0's `session_<uuid>` token
- * shape; do NOT assume bare-UUID. The cli-client stores it verbatim and
- * passes it back via `kimi -r <token>` for resume.
+ * Session ids are opaque tokens: store them verbatim and pass them back via
+ * `kimi -r <token>`; never assume a bare UUID.
  */
 export interface SessionResumeHintRecord {
   readonly role: "meta";
@@ -241,22 +84,10 @@ export interface TurnStepRetryingRecord {
 }
 
 /**
- * Version banner emitted by kimi-code's native agent-core-v2 print driver once
- * per `-p` run, before the assistant/tool stream. v1.9.4 refused the old
- * experimental-flag route because plan-mode final allow can precede external
- * hooks; after 0.33.0 made v2 the unflagged default, cli-client additionally
- * pins every accepted child to `KIMI_CODE_LEGACY_FLAG=1`. The v1 driver emits
- * no banner. This model remains for historical logs and a future safe
- * re-enable; cli-client filters it through the meta-record boundary
- * (role === "meta" → skipped from records[]).
- *
- * Modeled explicitly since v1.8.5: previously an unknown meta.type routed to the
- * malformed/diagnostic channel (non-fatal, records[] and the terminal
- * session.resume_hint were never affected). Recognizing it keeps a benign,
- * expected v2 line out of the diagnostics log. An upstream default flip is now
- * a release-blocking safety event, not a parser-only non-event: the refusal gate
- * and plan-order audit must be revisited first. Observed at
- * @moonshot-ai/kimi-code 0.24.x → 0.41.0; `version` is the kimi-code semver.
+ * Native agent-core-v2 version marker, emitted once before assistant/tool output.
+ * Native-v2 plans require it as the first stream-json record and require its
+ * version to equal the probed certified version; legacy-v1 plans refuse it.
+ * It is captured out-of-band and filtered from consumer records.
  */
 export interface SystemVersionRecord {
   readonly role: "meta";
@@ -273,7 +104,7 @@ export type StreamJsonRecord =
 
 /**
  * Goal-summary record emitted by kimi-code 0.8.0+ headless goal mode
- * (`kimi -p "/goal <objective>"`) at the END of a goal run, immediately before
+ * (`kimi -p "/goal -- <objective>"`) at the END of a goal run, immediately before
  * the session.resume_hint. Unlike assistant/tool/meta records it carries NO
  * `role` field — it is keyed by `type: "goal.summary"`.
  *
@@ -285,11 +116,9 @@ export type StreamJsonRecord =
  * record union. cli-client captures the first one and filters it, mirroring how
  * the resume-hint meta record is captured out-of-band.
  *
- * Only emitted when the experimental flag `goal-command` is enabled AND the
- * prompt is `/goal`-prefixed. Before /kimi:pursue this never appeared (it would
- * have landed in the malformed channel as "unknown role: undefined");
- * recognizing it is forward-compat hardening that also unlocks structured goal
- * progress. All fields are nullable upstream (null when no goal snapshot exists).
+ * The `/goal` prefix triggers the record. Releases 0.8–0.11 additionally require
+ * the `goal-command` experimental flag; 0.12+ do not. All fields are nullable
+ * upstream (null when no goal snapshot exists).
  *
  * Source: apps/kimi-code/src/cli/goal-prompt.ts::goalSummaryJson (GoalSummary),
  * verified at @moonshot-ai/kimi-code@0.9.0.
@@ -305,15 +134,9 @@ export interface GoalSummaryRecord {
 }
 
 /**
- * An object line carrying a string `role` the parser doesn't model
- * (assistant/tool/meta). H3 forward-compat: a future kimi-code version may add
- * a new top-level role; rather than flagging it as `malformed` (error framing +
- * diagnostic noise for a legitimate-but-new record), the parser surfaces it
- * here, out-of-band — the same posture as `meta`/`goalSummary`. It is NOT placed
- * in `records[]`: the sweep (2026-06-09) confirmed the only `records[]` consumer,
- * `reassembleProseFromRecords`, reads `role === "assistant"` exclusively, so
- * keeping unknown roles out-of-band cannot affect any command's output. The raw
- * parsed object is preserved for diagnostics / future opt-in handling.
+ * An object line with an unmodeled string role. Unknown roles are forward-
+ * compatible diagnostics, not malformed output, and stay out of records[] so
+ * role-keyed prose consumers remain stable. The raw object is preserved.
  */
 export interface UnknownRoleRecord {
   readonly role: string;
@@ -346,10 +169,8 @@ export const MAX_STREAM_JSON_LINE_BYTES = 1_048_576;
  * Lifecycle:
  *   - `push(chunk)` — consume bytes; returns outcomes for any complete lines
  *     that finished within this chunk.
- *   - `flush()` — at end of stream, force-parse the trailing buffer if any.
- *     Stream-json emits a newline after every record (run-prompt.ts:573), so
- *     a non-empty flush remainder indicates an unfinished record (likely an
- *     interrupted spawn).
+ *   - `flush()` — at end of stream, parse a valid trailing JSON record even
+ *     without a final newline; malformed trailing input becomes diagnostic.
  *
  * Outcomes are non-throwing — malformed lines surface via `malformedLine` /
  * `malformedReason` so callers can route them to a diagnostics log without
@@ -389,8 +210,6 @@ export class StreamJsonParser {
     while (newlineIndex !== -1) {
       const line = this.buffer.slice(0, newlineIndex);
       this.buffer = this.buffer.slice(newlineIndex + 1);
-      // Skip blank lines (the writer doesn't emit them, but tolerate
-      // CRLF-doubled or trailing whitespace defensively).
       if (line.replace(/\r/g, "").length > 0) {
         out.push(parseLine(line));
       }
@@ -424,8 +243,6 @@ function parseLine(line: string): StreamJsonOutcome {
   if (role === "meta") {
     return validateMeta(parsed, line);
   }
-  // Role-less goal-mode summary (kimi-code 0.8.0+). Keyed by `type`, not
-  // `role`, so it's surfaced on the dedicated goalSummary outcome channel.
   if (role === undefined && parsed["type"] === "goal.summary") {
     return validateGoalSummary(parsed, line);
   }
@@ -445,16 +262,9 @@ function parseLine(line: string): StreamJsonOutcome {
       message: parsed["message"].slice(0, 4000),
     } };
   }
-  // H3 forward-compat: a non-empty string role we don't model (a role a future
-  // kimi-code adds). Surface it out-of-band on the unknownRecord channel —
-  // tolerated, not malformed — so the parser keeps working and the diagnostic
-  // log distinguishes "new upstream role" from a genuinely broken line. It
-  // never enters records[] (see UnknownRoleRecord + the consumer sweep).
   if (typeof role === "string" && role.length > 0) {
     return { unknownRecord: { role, raw: parsed } };
   }
-  // Genuinely malformed: no `role` at all (and not a recognized role-less typed
-  // record like goal.summary), or a non-string role. Surface as malformed.
   return {
     malformedLine: line,
     malformedReason: `unknown role: ${JSON.stringify(role)}`,
@@ -577,9 +387,7 @@ function validateMeta(parsed: Record<string, unknown>, line: string): StreamJson
     };
     return { record };
   }
-  // Unknown meta types are forward-compatible — surface them via the
-  // malformed channel for diagnostics, but don't crash. kimi-code may add
-  // new meta types in 0.3.x and our wrapper should keep working.
+  // Unknown meta types are diagnostic-only and nonfatal.
   return {
     malformedLine: line,
     malformedReason: `unknown meta.type: ${JSON.stringify(type)}`,
@@ -680,8 +488,6 @@ export function extractSessionIdFromStderr(stderr: string): string | undefined {
   // hostile stderr line could pin `session_--------` (8 dashes) or any
   // 8+ char hex-dash token as the captured session id, weakening the
   // "anchored full-UUID regex" safety invariant documented in AGENTS.md.
-  // Review-smoke (kimi 0.2.0 on the alpha.5 candidate) flagged the loose
-  // form; this is the post-review tightening.
   const uuid = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
   const pattern = new RegExp(
     `^To resume this session:\\s+kimi\\s+-r\\s+(session_${uuid}|${uuid})\\s*$`,

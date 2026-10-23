@@ -79,16 +79,43 @@ describe("parsePursueArgs", () => {
 });
 
 describe("buildGoalPrompt", () => {
-  test("prefixes /goal and passes the objective through", () => {
-    expect(buildGoalPrompt("fix the build")).toBe("/goal fix the build");
+  test("prefixes /goal with the objective delimiter", () => {
+    expect(buildGoalPrompt("fix the build")).toBe("/goal -- fix the build");
   });
 
-  test("appends a soft turn instruction when --turns is set", () => {
+  test.each([
+    "status the deployment",
+    "pause the rollout",
+    "replace the old parser",
+    "next inspect the queue",
+    "--fix-the-build please",
+  ])("preserves a reserved initial-word objective: %s", (objective) => {
+    expect(buildGoalPrompt(objective)).toBe(`/goal -- ${objective}`);
+  });
+
+  test("keeps --turns soft and does not mistake its stop for completion", () => {
     const prompt = buildGoalPrompt("fix the build", 5);
-    expect(prompt.startsWith("/goal fix the build")).toBe(true);
+    expect(prompt.startsWith("/goal -- fix the build")).toBe(true);
     expect(prompt).toContain("at most 5 turns");
     expect(prompt).toContain("soft instruction");
-    expect(prompt).not.toContain("SetGoalBudget");
+    expect(prompt).toContain("plugin owns the outer wall-clock budget");
+    expect(prompt).toContain("do not call SetGoalBudget");
+    expect(prompt).toContain("Unfinished work at the soft stop is not completion");
+  });
+
+  test("normalizes whitespace before applying the upstream objective limit", () => {
+    const normalized = "x".repeat(3990);
+    expect(buildGoalPrompt(`${normalized}                    `)).toBe(`/goal -- ${normalized}`);
+  });
+
+  test("accounts for the 4000-character objective limit including turn guidance", () => {
+    expect(() => buildGoalPrompt("x".repeat(4000))).not.toThrow();
+    expect(() => buildGoalPrompt("x".repeat(4001))).toThrow("pursue objective exceeds Kimi's 4000-character goal limit; shorten the objective.");
+
+    const objective = "x".repeat(3800);
+    const turnGuidanceLength = buildGoalPrompt(objective, 5).length - buildGoalPrompt(objective).length;
+    expect(() => buildGoalPrompt("x".repeat(4000 - turnGuidanceLength), 5)).not.toThrow();
+    expect(() => buildGoalPrompt("x".repeat(4001 - turnGuidanceLength), 5)).toThrow(/omit --turns/);
   });
 });
 

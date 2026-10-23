@@ -32,28 +32,11 @@ import {
 import { assertCliResultSuccess, reassembleProseFromRecords, warnIfSessionIdMissing, warnHookEscapes } from "./cli-helpers.js";
 import { buildKimiSessionTitle, syncKimiSessionTitle } from "../session-title.js";
 
-// /kimi:pursue — autonomous goal mode (kimi-code 0.8.0+ headless `/goal`).
-//
-// PROTOTYPE SCOPE (v1.1 experimental). Deliberately narrow:
-//   - FOREGROUND ONLY. No --background/--detach yet. Goal mode is experimental
-//     upstream and its cancellation semantics want a human watching; a hard
-//     wall-clock budget bounds the run. (kimi's own shape-consult, report 60.)
-//   - NO --resume. In goal mode `goal.summary` emits a *goalId* that is
-//     DISTINCT from the resume-hint *sessionId*; `kimi -r <sessionId>` re-enters
-//     the session but not necessarily the goal continuation. Exposing resume
-//     before that split is reconciled upstream would be a silent-failure trap,
-//     so we capture+surface the goalId but don't offer resume yet.
-//   - Reuses the RESCUE job lineage (command_type "rescue", KIMI_PLUGIN_CC_CMD=
-//     "rescue") so the PreToolUse hook applies the workspace write allowlist to
-//     EVERY continuation turn, and /kimi:status / /kimi:result / /kimi:cancel
-//     work unchanged. Promoting pursue to a first-class command_type is a
-//     follow-up (would ripple through ManagedCommandType + the registry).
-//
-// SAFETY: the hook fires on every tool call in every continuation turn (policy
-// index 0, verified against kimi-code 0.9.0 — report 58 — and re-verified through
-// 0.12.0 by the goal-mode real-binary smoke, reports 61-65). So a goal-mode run
-// is exactly as write-gated as a single-turn rescue. The only NEW risk is
-// unboundedness, bounded here by the AbortController wall-clock ceiling.
+// /kimi:pursue — experimental autonomous goal mode (kimi-code 0.8.0+).
+// Runtime-foreground-only, with a mandatory finite wall-clock budget. No resume:
+// goalId is distinct from sessionId. Rescue lineage and the "rescue" hook label
+// apply the workspace write allowlist on every continuation turn, and the hook
+// is mandatory. Status, result, and cancellation use the same rescue lineage.
 
 const PURSUE_SUMMARY_MAX = 120;
 const PURSUE_AGENT_PROFILE = "<goal-mode>";
@@ -61,12 +44,6 @@ const PURSUE_AGENT_PROFILE = "<goal-mode>";
 /** Terminal goal status decoded from the process exit code (goal-prompt.ts). */
 export type GoalExitStatus = "complete" | "blocked" | "paused" | "unknown";
 
-/**
- * Map a headless goal-mode exit code to a terminal status. complete=0 is
- * success; blocked=3 and paused=6 are terminal-but-resumable (NOT failures);
- * anything else is a genuine process failure. Source:
- * apps/kimi-code/src/cli/goal-prompt.ts::GOAL_EXIT_CODES.
- */
 /**
  * Goal-terminal exits (3 = blocked, 6 = paused) are NOT failures, so
  * `assertCliResultSuccess` never runs for them — which means a native-v2 plan
@@ -99,6 +76,12 @@ export function assertGoalRunProvenance(
   );
 }
 
+/**
+ * Map a headless goal-mode exit code to a terminal status. complete=0 is
+ * success; blocked=3 and paused=6 are terminal non-failures; anything else is
+ * a genuine process failure. Source:
+ * apps/kimi-code/src/cli/goal-prompt.ts::GOAL_EXIT_CODES.
+ */
 export function classifyGoalExit(exitCode: number): GoalExitStatus {
   switch (exitCode) {
     case 0:
@@ -119,10 +102,21 @@ export function classifyGoalExit(exitCode: number): GoalExitStatus {
  * wall-clock AbortController; goal budget mutation is not authorized.
  */
 export function buildGoalPrompt(objective: string, turns?: number): string {
-  const trimmed = objective.trim();
+  const trimmed = objective.trim().split(/\s+/).join(" ");
   const turnHint =
-    turns !== undefined ? ` Stop after at most ${turns} turns; this is a soft instruction, not an enforced turn budget.` : "";
-  return `/goal ${trimmed}${turnHint}`;
+    turns !== undefined
+      ? ` The plugin owns the outer wall-clock budget; do not call SetGoalBudget. Stop after at most ${turns} turns (soft instruction). Unfinished work at the soft stop is not completion.`
+      : "";
+  if (trimmed.length + turnHint.length > 4_000) {
+    throw new RuntimeError(
+      "INVALID_ARGS",
+      turns === undefined
+        ? "pursue objective exceeds Kimi's 4000-character goal limit; shorten the objective."
+        : "pursue objective plus --turns guidance exceeds Kimi's 4000-character goal limit; shorten the objective or omit --turns.",
+      "pursue.parse",
+    );
+  }
+  return `/goal -- ${trimmed}${turnHint}`;
 }
 
 function renderGoalHeader(

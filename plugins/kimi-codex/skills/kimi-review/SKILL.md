@@ -1,11 +1,11 @@
 ---
 name: kimi-review
-description: "Run an independent read-only Kimi review over the current working tree or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits."
+description: "Run an independent read-only Kimi review over the current working tree, including untracked files, or a branch diff. Use when the user wants a second reviewer for defects, regressions, or implementation risks, not edits."
 ---
 
 # Kimi Review
 
-Forward this request to the local kimi-code companion runtime by shell. Do not use MCP for this skill.
+Forward this request to the local Kimi Code companion runtime by shell. Do not use MCP for this skill.
 
 ## Invocation
 
@@ -29,6 +29,6 @@ Pass through: `[--budget <30m|1h|90s>] [--base <ref>] [-m <model>] [--thinking <
 - For subscription auth, guide native Kimi `/login`; for API keys or other providers, guide native `/provider` and have the user enter secrets there. Only an explicit saved-default request calls for native `/model`. Re-list after setup; use `setup --check` for hook readiness. Swarm `-m` selects the coordinator; `[secondary_model]` can select different child models.
 - Preserve `--budget <dur>` (30m|1h|90s or bare minutes, maximum 24h); default 30m for ask/review/challenge, 45m for rescue. Backgrounding does not extend the budget. On timeout the job stays failed and `result <jobId> [--json]` returns an artifact with partial output labeled NOT a final answer. A session ID is kept if Kimi announced it or, on a native-v2 budget timeout, recovered from the session store when exactly one session matching this spawn exists; `result --json` identifies the source in `kimi_session_id_source`. Cancellation does not capture partial output. Ask/rescue resume inherits the parent budget unless explicitly overridden. Inherited budgets are printed to stderr at launch; status and `result --json` expose `budget_source` (`explicit`, `inherited`, or `default`; old non-null budgets report `unknown`).
 - Forward `--base <ref>`, `-m`/`--model <name>`, `--budget <dur>`, and any trailing focus text only.
-- Do not invent file/path flags; review's payload is the git diff plus optional focus text.
+- Do not invent file/path flags; working-tree review supplies Git status and diff context, with untracked files read from the workspace, plus optional focus text. `--base` keeps the branch diff as its scope.
 - If the companion reports REVIEW_HOOK_NOT_INSTALLED, tell the user to run Claude Code /kimi:setup or Codex $kimi-setup, then retry; do not suggest the skip env.
 - Return companion stdout verbatim and leave any fixes to a separate user request.

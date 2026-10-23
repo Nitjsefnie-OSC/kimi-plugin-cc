@@ -4,17 +4,13 @@ import type { ManagedCommandType } from "../types.js";
 /**
  * Discriminant for how the command's Kimi output is consumed.
  *
- * - `passthrough`: the prose `finalText` is rendered verbatim into the
- *   artifact. review/challenge/ask/rescue all use this since v0.2.3
- *   dropped their JSON schemas.
- * - `parsed`: the command JSON.parses the output and validates it
- *   against a structured schema. review_gate is currently the only
- *   parsed command (JSON allow/block decision).
+ * - `passthrough`: render prose `finalText` verbatim into the artifact; used by
+ *   review/challenge/ask/rescue.
+ * - `parsed`: parse and validate structured output; used only by review_gate's
+ *   JSON allow/block decision.
  *
- * The discriminant exists so a future caller can type-narrow on it
- * instead of inferring intent from the command-type string. The
- * runtime invariant (review/challenge/ask/rescue are prose
- * pass-through) is now enforced at the registry layer.
+ * The registry enforces this distinction instead of letting callers infer it
+ * from the command-type string.
  */
 export type CommandOutputMode = "passthrough" | "parsed";
 
@@ -25,10 +21,9 @@ export type CommandOutputMode = "passthrough" | "parsed";
  */
 export interface CommandCancellationConfig {
   /**
-   * Milliseconds to wait after `client.cancel()` before escalating to
-   * SIGTERM on the wire child. All managed commands currently use
-   * 1500ms; the registry exists so per-command tuning is possible
-   * without searching the codebase.
+   * Milliseconds to wait after `client.cancel()` before escalating to SIGTERM
+   * on the managed child process. All managed commands currently use 1500ms;
+   * the registry permits per-command tuning without searching the codebase.
    */
   readonly escalationMs: number;
   /** Error codes used when wrapping cancel events. */
@@ -60,14 +55,11 @@ const parsedOutput: CommandOutputMode = "parsed";
 const DEFAULT_ESCALATION_MS = 1_500;
 
 /**
- * Build the cancellation config from a short prefix. The prefix is
- * both the title-cased noun ("Ask"/"Rescue"/...) and the SCREAMING
- * uppercase error-code stem ("ASK_"/"RESCUE_"/...). Centralizes the
- * pattern that ask/rescue/review used to inline in three near-identical
- * variants.
+ * Build cancellation config from the display name used verbatim in messages
+ * and the uppercase stem used in error codes.
  */
 function makeCancellationConfig(prefix: {
-  /** Capitalized noun used in user-visible messages, e.g. "Ask". */
+  /** Display name used verbatim in user-visible messages. */
   readonly displayName: string;
   /** Uppercase stem used in error codes, e.g. "ASK". */
   readonly errorCodeStem: string;
@@ -91,21 +83,11 @@ function makeCancellationConfig(prefix: {
 }
 
 /**
- * Single source of truth for per-command behavior. Keyed by
- * `ManagedCommandType` — only commands that actually run the
- * managed-cancellation flow participate. `setup` and `task` are
- * intentionally NOT here: they don't go through the SIGTERM/cancel
- * path that this registry configures, so adding placeholder entries
- * for them would be type-system noise without behavior.
+ * Single source of truth for per-command behavior. Only commands using the
+ * managed-cancellation flow participate; `setup` and `task` do not.
  *
- * Casing note: `ask`, `rescue`, and `review_gate` carry capitalized
- * `displayName` values matching their pre-registry hardcoded strings
- * ("Ask cancelled...", "Rescue failed.", "review_gate cancelled..."
- * for the lowercased compound noun). `review` and `challenge` carry
- * lowercase displayName values to match their pre-registry pattern
- * (the old code interpolated `${commandType}` directly). Mixed casing
- * is established prior art — the registry preserves it rather than
- * homogenizing.
+ * Display-name casing is part of the user-visible contract: `Ask` and `Rescue`
+ * are title-cased, while `review`, `challenge`, and `review_gate` are lowercase.
  */
 export const COMMAND_REGISTRY: Readonly<Record<ManagedCommandType, CommandConfig>> = {
   ask: {

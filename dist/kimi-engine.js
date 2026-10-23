@@ -40,6 +40,7 @@ export const NATIVE_V2_CERTIFIED_VERSIONS = Object.freeze([
     "2.1.1",
     "2.2.0",
     "2.3.0",
+    "2.3.1",
 ]);
 /** Per-operation native-v2 certification. One green operation never certifies another. */
 export const NATIVE_V2_CERTIFIED = new Map([
@@ -578,7 +579,6 @@ async function resolveExactExecutable(command, cwd, env) {
             return await realpath(candidate);
         }
         catch {
-            // Keep searching; failure is reported once with the original command.
         }
     }
     throw new RuntimeError("KIMI_EXECUTION_PLAN_UNRESOLVED", `Refusing to spawn kimi because executable ${JSON.stringify(command)} could not be resolved to an exact runnable path. Run Claude Code \`/kimi:setup\` or Codex \`$kimi-setup\` to verify the active binary, or correct KIMI_PLUGIN_CC_KIMI_BIN and retry.`, "kimi-engine.plan", { details: { command, cwd } });

@@ -1,6 +1,6 @@
-# Claude Code commands
+# Kimi task commands
 
-These Markdown files route Claude Code commands through `scripts/companion.sh` to the Node runtime. They also describe supported flags and model-selection rules. Codex uses the generated skills in `plugins/kimi-codex/skills/`.
+These Markdown files expose Kimi's ask, review, challenge, rescue, pursue, and swarm capabilities as Claude Code commands, routed through `scripts/companion.sh` to the Node runtime and local Kimi Code CLI. They also describe supported flags and model-selection rules. Codex uses the generated skills in `plugins/kimi-codex/skills/`.
 
 | File | Purpose |
 | --- | --- |

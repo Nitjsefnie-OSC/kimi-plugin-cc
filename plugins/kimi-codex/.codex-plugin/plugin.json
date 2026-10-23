@@ -1,7 +1,7 @@
 {
   "name": "kimi",
-  "version": "2.2.2",
-  "description": "Codex plugin that delegates review, challenge, ask, rescue, pursue, and swarm workflows to the local kimi-code CLI through the kimi-plugin-cc companion runtime.",
+  "version": "2.3.1",
+  "description": "Kimi for Codex: code questions, independent reviews, bounded fixes, autonomous goals, and parallel tasks through the local Kimi Code CLI.",
   "author": {
     "name": "linxule"
   },
@@ -19,8 +19,8 @@
   "skills": "./skills/",
   "interface": {
     "displayName": "Kimi",
-    "shortDescription": "Delegate repo work to local kimi-code",
-    "longDescription": "Shell-only Codex packaging for kimi-plugin-cc. It exposes Codex skills that call the existing companion runtime and local kimi-code subprocess, while preserving the Claude Code plugin surface.",
+    "shortDescription": "Ask, review, and build with Kimi",
+    "longDescription": "Kimi Code workflows for Codex: read-only explanations and reviews, bounded workspace fixes, autonomous goals, and parallel tasks. Codex skills call a self-contained shell runtime; no MCP server is required.",
     "developerName": "linxule",
     "category": "Developer Tools",
     "capabilities": [
