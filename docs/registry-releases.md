@@ -6,8 +6,10 @@ remain available. The package has no install scripts and no separate CLI.
 
 ## Publishing status
 
-Plugin **2.3.1** certifies exact CLI **2.3.1**. [Release v2.3.1](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.3.1) is anchored at `20011ff0554c611afe0a426b30a68c2473175568`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977037533) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977818482) passed. The registry tarball has SHA-1 `e309448480a2ce841b49840cdaeeed37acc6c50b`, contains 196 files, and matches the CI artifact byte-for-byte. See the [certification evidence](./upstream-2.3.1-certification.md).
-The previous verified publication was **2.2.2**:
+Plugin **2.4.0** preserves exact CLI **2.3.1** certification and adds the shared MCP transport. [Release v2.4.0](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.4.0) is anchored at `9232d1ec98465454d8d9328e439d3f31bfc53e04`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/40040084944) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/40040442610) passed. The registry tarball has SHA-1 `8243616529aa9f03f26bf4fef68c36d90e2304ae`, contains 222 files, and matches the CI artifact byte-for-byte. A fresh npm install passed isolated setup/check for both hosts.
+The previous verified publication was **2.3.1**:
+[Release v2.3.1](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.3.1) is anchored at `20011ff0554c611afe0a426b30a68c2473175568`; its [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977037533) and [release-event publishing run](https://github.com/linxule/kimi-plugin-cc/actions/runs/39977818482) passed. The registry tarball has SHA-1 `e309448480a2ce841b49840cdaeeed37acc6c50b`, contains 196 files, and matches the CI artifact byte-for-byte. See the [certification evidence](./upstream-2.3.1-certification.md).
+Earlier verified publication was **2.2.2**:
 [Release v2.2.2](https://github.com/linxule/kimi-plugin-cc/releases/tag/v2.2.2)
 is anchored at `256e78ff7cbf302fb19e8e523d8e3f943f7cb366`; its
 [CI check](https://github.com/linxule/kimi-plugin-cc/actions/runs/39755724024)
