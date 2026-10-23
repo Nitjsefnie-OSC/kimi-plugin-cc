@@ -27,7 +27,7 @@ describe("MCP attachment timeout", () => {
       );
     `;
     try {
-      const result = spawnSync(stableNode, ["--input-type=module", "-e", runner], {
+      const result = spawnSync(stableNode, ["--no-warnings", "--input-type=module", "-e", runner], {
         cwd: fixture.repo,
         env: {
           ...fixture.env,
@@ -86,7 +86,7 @@ describe("MCP attachment timeout", () => {
     let store: JobStore | undefined;
     let companionPid: number | undefined;
     try {
-      const result = spawnSync(stableNode, ["--input-type=module", "-e", runner], {
+      const result = spawnSync(stableNode, ["--no-warnings", "--input-type=module", "-e", runner], {
         cwd: fixture.repo,
         env: {
           ...fixture.env,
@@ -212,7 +212,7 @@ describe("MCP attachment timeout", () => {
     let store: JobStore | undefined;
     let companionPid: number | undefined;
     try {
-      const result = spawnSync(stableNode, ["--input-type=module", "-e", runner], {
+      const result = spawnSync(stableNode, ["--no-warnings", "--input-type=module", "-e", runner], {
         cwd: fixture.repo,
         env: {
           ...fixture.env,

@@ -177,7 +177,7 @@ async function runSyntheticScenario(
     "#!/bin/sh\ntrap '' TERM\nwhile :; do sleep 30; done\n",
     { mode: 0o755 },
   );
-  return spawnSync(stableNode, ["--input-type=module", "-e", runner], {
+  return spawnSync(stableNode, ["--no-warnings", "--input-type=module", "-e", runner], {
     cwd: fixture.repo,
     env: {
       ...fixture.env,
