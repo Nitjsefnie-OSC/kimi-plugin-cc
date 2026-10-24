@@ -10,6 +10,14 @@ describe("classifyManagedCommandFailure", () => {
     expect(result).toBe(original);
   });
 
+  test("leaves unrelated RuntimeErrors with spawn details unclassified", () => {
+    const original = new RuntimeError("CLI_SPAWN_CALLBACK_FAILED", "spawn callback failed", "cli-client.spawn", {
+      details: { spawn_code: "E2BIG" },
+    });
+    expect(classifySetupFailure(original)).toBeNull();
+    expect(classifyManagedCommandFailure(original, "review", "job-xyz")).toBe(original);
+  });
+
   test("collapses to `${commandType}.runtime` stage by default", () => {
     const inner = new RuntimeError(
       "TIMEOUT",
