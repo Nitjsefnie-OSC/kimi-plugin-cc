@@ -1,0 +1,69 @@
+# OSC fork CI wrapper — dispatch with `target_ref` to test any branch.
+# Job copied verbatim from the repository's own .github/workflows/ci.yml
+# (`check`); ci.yml has no path-filter gating, so nothing is excluded.
+# ci.yml's real-binary smokes auto-skip without KIMI_PLUGIN_CC_SMOKE=1, so no
+# secrets are required on the fork.
+# This file is intentionally not sent upstream.
+name: OSC manual CI
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_ref:
+        description: 'Git branch, tag, or 40-character commit SHA to validate'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: osc-manual-${{ github.repository }}-${{ inputs.target_ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          ref: ${{ inputs.target_ref }}
+
+      - name: Provenance
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "tested_target_ref=${{ inputs.target_ref }}"
+          checked_out_sha="$(git rev-parse HEAD)"
+          if [[ ! "$checked_out_sha" =~ ^[0-9a-f]{40}$ ]]; then
+            echo "::error::git rev-parse HEAD did not produce a 40-character commit SHA: $checked_out_sha"
+            exit 1
+          fi
+          printf 'checked-out SHA: %s\n' "$checked_out_sha"
+
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+
+      # The runtime targets Node >= 22.5 (companion + worker spawns); pin the
+      # engines floor so CI matches the documented support baseline.
+      - name: Set up Node
+        uses: actions/setup-node@v7
+        with:
+          node-version: "22"
+
+      - name: Install dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Audit dependencies
+        run: bun audit
+
+      # Rebuilds and checks root dist/ plus the self-contained Codex package.
+      # Generated surface hashes and untracked distribution files are checked too.
+      - name: Check (build, surfaces, typecheck, test, drift gate)
+        run: bun run check
+
+      - name: Check npm package installation
+        run: bun run check:package
